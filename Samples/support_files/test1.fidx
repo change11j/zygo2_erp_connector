@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Fiducials xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <MasterSet>0</MasterSet>
+  <LateralResolution>0</LateralResolution>
+  <WorkingSets>
+    <WorkingSet>
+      <Shapes>
+        <Shape Type="CrosshairFiducial" Text="" Rotation="0" GroupGuid="0" Visible="true" X0="419.68829345703125" Y0="250.93673706054687" Width="35.13629150390625" Height="35.13629150390625">
+          <InnerCirclePercentage>0</InnerCirclePercentage>
+        </Shape>
+        <Shape Type="CrosshairFiducial" Text="" Rotation="0" GroupGuid="0" Visible="true" X0="139.98013305664062" Y0="783.33731079101562" Width="16" Height="16">
+          <InnerCirclePercentage>0</InnerCirclePercentage>
+        </Shape>
+      </Shapes>
+    </WorkingSet>
+    <WorkingSet>
+      <Shapes />
+    </WorkingSet>
+    <WorkingSet>
+      <Shapes />
+    </WorkingSet>
+    <WorkingSet>
+      <Shapes />
+    </WorkingSet>
+  </WorkingSets>
+</Fiducials>

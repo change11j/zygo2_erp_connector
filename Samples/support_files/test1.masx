@@ -1,0 +1,48 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RegionList>
+  <Regions Label="Acquisition">
+    <RoiList>
+      <ROI>Acquisition,False</ROI>
+    </RoiList>
+    <Shapes />
+  </Regions>
+  <Regions Label="Focus Tilt">
+    <RoiList>
+      <ROI>Acquire,False</ROI>
+    </RoiList>
+    <Shapes />
+  </Regions>
+  <Regions Label="Surface">
+    <RoiList>
+      <ROI>Test,False</ROI>
+    </RoiList>
+    <Shapes>
+      <Shape Type="RectangleShape" Filled="True" Rotation="0" X0="393.5" Y0="501" Width="145" Height="20" GroupGuid="0">
+        <RoiList>
+          <ROI>Test</ROI>
+        </RoiList>
+      </Shape>
+      <Shape Type="CircleSideShape" Filled="True" Rotation="0" X0="176.833938598633" Y0="105.409912109375" Width="232.722152709961" Height="232.72216796875" GroupGuid="0">
+        <RoiList>
+          <ROI>Test</ROI>
+        </RoiList>
+      </Shape>
+      <Shape Type="PolygonShape" Filled="True" Rotation="0" GroupGuid="0">
+        <Point X="552.5711669921875" Y="789.3651123046875" />
+        <Point X="771.95501708984375" Y="622.25445556640625" />
+        <Point X="807.8831787109375" Y="801.89520263671875" />
+        <Point X="671.04791259765625" Y="792.18603515625" />
+        <Point X="723.23406982421875" Y="844.3721923828125" />
+        <Point X="549.75030517578125" Y="912.07318115234375" />
+        <Point X="374.8560791015625" Y="842.96173095703125" />
+        <Point X="435.5048828125" Y="670.888427734375" />
+        <Point X="362.77340698242187" Y="594.31036376953125" />
+        <Point X="606.16778564453125" Y="666.6571044921875" />
+        <Point X="642.2144775390625" Y="666.1666259765625" />
+        <RoiList>
+          <ROI>Test</ROI>
+        </RoiList>
+      </Shape>
+    </Shapes>
+  </Regions>
+</RegionList>
