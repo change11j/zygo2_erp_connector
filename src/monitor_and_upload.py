@@ -1,117 +1,117 @@
+# monitor_and_upload.py
 from __future__ import print_function
+import sys
 from zygo import ui, mx, connectionmanager
 from zygo.units import Units
 import time
-from database_manager import DatabaseManager
+from settings_manager import SettingsManager
 import threading
-from datetime import datetime
+from erp_util import ERPAPIUtil
+import logging
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 class MeasurementMonitor:
     def __init__(self):
-        self.db_manager = DatabaseManager()
         self.is_running = True
         self.measurement_lock = threading.Lock()
+        self.db_lock = threading.Lock()
         self.last_data = None
 
+    def _get_settings(self):
+        """Thread-safe settings retrieval"""
+        with self.db_lock:
+            settings_manager = SettingsManager()
+            try:
+                settings = settings_manager.load_current_settings()
+                return settings
+            finally:
+                settings_manager.close()
+
+    def _check_settings(self, settings):
+        """Validate settings"""
+        if not settings:
+            logging.warning("No settings found")
+            return False
+            
+        required = ["sample_name", "group_name", "position_name", "operator"]
+        if not all(settings.get(key) for key in required):
+            missing = [key for key in required if not settings.get(key)]
+            logging.warning("Missing required settings: %s", missing)
+            return False
+            
+        return True
+
     def connect_to_zygo(self):
-        """連接到Zygo"""
         try:
-            print("Connecting to Zygo...")
             self.uid = connectionmanager.connect(host='localhost', port=8733)
-            print("Connected to Zygo (UID: %s)" % self.uid)
+            logging.info("Connected to Zygo successfully")
             return True
-        except:
-            print("Failed to connect to Zygo")
+        except Exception as e:
+            logging.error("Failed to connect to Zygo: %s", str(e))
             return False
 
-    def check_settings(self):
-        """檢查設置是否存在"""
-        settings = self.db_manager.get_settings()
-        return settings and all([
-            settings.get("sample_name"),
-            settings.get("parameter_name"),
-            settings.get("position_name")
-        ])
+    def get_measurement_data(self, settings):
+        """收集所有測量欄位的數據"""
+        base_data = {
+            'operator': settings.get('operator', 'Unknown'),
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
 
-    def get_measurement_data(self):
-        """獲取測量數據"""
-        data = {}
-        try:
-            # W1-W3 測量
+        # 加入 SOP 參數（這些將成為 attributes）
+        attributes = {}
+        for key, value in settings.items():
+            if key not in ['sample_name', 'group_name', 'position_name', 'operator', 'measurement_fields', 'timestamp']:
+                attributes[key] = value
+
+        # 收集所有測量點的數據
+        measurement_results = []
+        has_changes = False
+
+        for field in settings.get('measurement_fields', []):
             try:
-                data['W1'] = mx.get_result_number(
-                    ("Analysis", "Custom", "W1"),
-                    Units.MicroMeters
-                )
-            except:
-                data['W1'] = None
+                field_name = field['name']
+                cleaned_path = [
+                    segment.strip().strip('"').strip("'")
+                    for segment in field['path'].split(',')
+                ]
+                path = tuple(cleaned_path)
+                value = mx.get_result_number(path, Units.MicroMeters)
 
-            try:
-                data['W2'] = mx.get_result_number(
-                    ("Analysis", "Custom", "W2"),
-                    Units.MicroMeters
-                )
-            except:
-                data['W2'] = None
+                if value is not None:
+                    # 為每個測量點創建數據集
+                    field_data = {
+                        'field_name': field_name,
+                        'value': value
+                    }
+                    # 為每個測量點添加屬性
+                    for attr_name, attr_value in attributes.items():
+                        field_data[attr_name] = attr_value
 
-            try:
-                data['W3'] = mx.get_result_number(
-                    ("Analysis", "Custom", "W3"),
-                    Units.MicroMeters
-                )
-            except:
-                data['W3'] = None
-
-            # H1-H3 測量
-            try:
-                data['H1'] = mx.get_result_number(
-                    ("Analysis", "Regions Surface", "Region #  1", "Test", "Surface Parameters", "Height Parameters",
-                     "Mean"),
-                    Units.MicroMeters
-                )
-            except:
-                data['H1'] = None
-
-            try:
-                data['H2'] = mx.get_result_number(
-                    ("Analysis", "Regions Surface", "Region #  2", "Test", "Surface Parameters", "Height Parameters",
-                     "Mean"),
-                    Units.MicroMeters
-                )
-            except:
-                data['H2'] = None
-
-            try:
-                data['H3'] = mx.get_result_number(
-                    ("Analysis", "Regions Surface", "Region #  3", "Test", "Surface Parameters", "Height Parameters",
-                     "Mean"),
-                    Units.MicroMeters
-                )
-            except:
-                data['H3'] = None
-
-            data['timestamp'] = time.strftime('%Y-%m-%d %H:%M:%S')
-
-            # 檢查數據是否有變化
-            if self.last_data is not None:
-                has_changes = False
-                for key in ['W1', 'W2', 'W3', 'H1', 'H2', 'H3']:
-                    if data[key] != self.last_data.get(key):
+                    # 檢查是否有變化
+                    if (self.last_data is None or
+                            field_name not in self.last_data or
+                            abs(self.last_data.get(field_name, 0) - value) > 1e-6):
                         has_changes = True
-                        break
-                if not has_changes:
-                    return None
 
-            self.last_data = data.copy()
-            return data
+                    measurement_results.append(field_data)
 
-        except:
-            print("Error getting measurement data")
-            return None
+            except Exception as e:
+                logging.error("Error getting field %s: %s", field['name'], str(e))
+
+        if has_changes and measurement_results:
+            # 更新最後的數據
+            self.last_data = {result['field_name']: result['value']
+                              for result in measurement_results}
+            return base_data, measurement_results
+
+        return None
+
     def monitoring_thread(self):
-        """監控線程的主函數"""
-        consecutive_errors = 0
         while self.is_running:
             try:
                 if not hasattr(self, 'uid'):
@@ -119,97 +119,89 @@ class MeasurementMonitor:
                         time.sleep(5)
                         continue
 
-                if not self.check_settings():
-                    time.sleep(2)
+                settings = self._get_settings()
+                if not self._check_settings(settings):
+                    time.sleep(5)
                     continue
 
-                settings = self.db_manager.get_settings()
-
                 with self.measurement_lock:
-                    data = self.get_measurement_data()
+                    data = self.get_measurement_data(settings)
                     if data:
-                        # 檢查數據是否有實際的測量值
-                        has_valid_data = False
-                        for key, value in data.items():
-                            if key != 'timestamp' and value is not None:
-                                has_valid_data = True
-                                break
+                        base_data, measurement_results = data
 
-                        if has_valid_data:
-                            self.save_to_db(data, settings)
-                            consecutive_errors = 0
-                            print("New measurement data saved at: %s" % data['timestamp'])
-                            for key in sorted(data.keys()):
-                                if key != 'timestamp':
-                                    if data[key] is not None:
-                                        print("%s: %.6f um" % (key, data[key]))
-                                    else:
-                                        print("%s: N/A" % key)
-                            print("-" * 50)
+                        # 打印基本信息
+                        logging.info("New measurement data at: %s", base_data['timestamp'])
 
-                time.sleep(0.5)
+                        # 打印每個測量點
+                        for measurement in measurement_results:
+                            if 'value' in measurement:
+                                logging.info("%s: %.6f um", measurement['field_name'], measurement['value'])
 
-            except:
-                consecutive_errors += 1
-                print("Error in monitoring thread (consecutive errors: %d)" % consecutive_errors)
-                if consecutive_errors > 5:
-                    time.sleep(5)
+                        # 打印屬性
+                        for key, value in base_data.items():
+                            if key not in ['timestamp', 'operator']:
+                                logging.info("%s: %s", key, value)
+
+                        logging.info("-" * 50)
+
+                        # 上傳數據
+                        self.upload_to_erp(data, settings)
+
+                time.sleep(5)
+
+            except Exception as e:
+                logging.error("Error in monitoring thread: %s", str(e))
+                time.sleep(5)
+
+    def upload_to_erp(self, data, settings):
+        """上傳所有測量點的數據"""
+        base_data, measurements = data
+
+        for measurement in measurements:
+            try:
+                # 組合完整的數據
+                full_data = base_data.copy()
+                full_data.update(measurement)
+
+                success, error = ERPAPIUtil.upload_measurement(
+                    settings["sample_name"],
+                    settings["group_name"],
+                    settings["position_name"],
+                    full_data
+                )
+
+                if success:
+                    logging.info("Successfully uploaded measurement: %s = %.6f um",
+                                 measurement['field_name'], measurement['value'])
                 else:
-                    time.sleep(1)
+                    logging.error("Failed to upload measurement %s: %s",
+                                  measurement['field_name'], error)
 
-    def save_to_db(self, data, settings):
-        """保存測量數據到數據庫"""
-        try:
-            # 保存到數據庫
-            measurement_id = self.db_manager.save_measurement(
-                settings["sample_name"],
-                settings["parameter_name"],
-                settings["position_name"],
-                data,
-                None,  # 不再保存datx_path
-                None  # 不再保存report_path
-            )
-
-            # 嘗試上傳到ERP
-            self.upload_to_erp(measurement_id, data, settings)
-        except:
-            print("Error saving to database")
-
-    def upload_to_erp(self, measurement_id, data, settings):
-        """上傳數據到ERP"""
-        try:
-            # 這裡實現與ERP的整合
-            self.db_manager.update_erp_upload_status(measurement_id, 1)
-            print("Data uploaded to ERP successfully")
-        except:
-            print("Error uploading to ERP")
-
+            except Exception as e:
+                logging.error("Error uploading measurement %s: %s",
+                              measurement['field_name'], str(e))
     def start(self):
-        """啟動監控"""
-        self.monitoring_thread = threading.Thread(target=self.monitoring_thread)
-        self.monitoring_thread.daemon = True
-        self.monitoring_thread.start()
-        print("Monitoring thread started")
+        self.monitor_thread = threading.Thread(target=self.monitoring_thread)
+        self.monitor_thread.daemon = True
+        self.monitor_thread.start()
+        logging.info("Monitoring started")
 
     def stop(self):
-        """停止監控"""
         self.is_running = False
         if hasattr(self, 'uid'):
             connectionmanager.terminate()
-        print("Monitoring stopped")
-
+        logging.info("Monitoring stopped")
 
 def main():
     monitor = MeasurementMonitor()
     try:
         monitor.start()
         while True:
-            time.sleep(1)
+            time.sleep(5)
     except KeyboardInterrupt:
-        print("\nReceived keyboard interrupt, stopping...")
+        logging.info("Received keyboard interrupt")
     finally:
         monitor.stop()
-
 
 if __name__ == "__main__":
     main()

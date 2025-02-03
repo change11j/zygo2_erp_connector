@@ -14,6 +14,14 @@
           </excludedPaths>
         </serverdata>
       </paths>
+      <paths name="zygo3">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/projects/zygo2_erp_connector" local="$PROJECT_DIR$" web="/" />
+            <mapping local="" />
+          </mappings>
+        </serverdata>
+      </paths>
     </serverData>
     <option name="myAutoUpload" value="ALWAYS" />
   </component>

@@ -123,3 +123,6 @@ class DatabaseManager(object):
 
             c.execute(query, params)
             return c.fetchall()
+
+    def get_measurement_fields(self):
+        pass
