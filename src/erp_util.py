@@ -104,6 +104,7 @@ class ERPAPIUtil:
                         {"@column": "APPXFileName", "val": appx_filename},
                         {"@column": "GroupName", "val": group_name},
                         {"@column": "SampleName", "val": sample_name},
+                        {"@column": "PositionName", "val": position_name},
                         {"@column": "operator", "val": measurement_data.get("operator", "Unknown")}
                     ]
                 }
@@ -112,59 +113,49 @@ class ERPAPIUtil:
         request_data["CompositeRequest"]["operations"]["operation"].append(measure_operation)
 
         # Get measurement fields and attributes
-        measurement_fields = []
-        for k, v in measurement_data.items():
-            if k not in ['timestamp', 'operator'] and v is not None:
-                try:
-                    # 確保值是有效的數字
-                    float_value = float(v)
-                    measurement_fields.append((k, float_value))
-                except ValueError:
-                    logging.warning("Skipping non-numeric value for %s: %s", k, v)
-
-        if measurement_fields:
-            field_name, value = measurement_fields[0]  # Get first measurement
-
-            data_operation = {
-                "TargetPort": "createData",
-                "ModelCRUD": {
-                    "serviceType": "setMeasureData",
-                    "TableName": "MeasuredData",
-                    "RecordID": 0,
-                    "Action": "Create",
-                    "DataRow": {
-                        "field": [
-                            {"@column": "DataName", "val": field_name},
-                            {"@column": "DataValue", "val": "{:.6f}".format(value)},  # 確保數字格式
-                            {"@column": "Measure_ID", "val": "@Measure.Measure_id"},
-                            {"@column": "Name", "val": field_name}
-                        ]
-                    }
-                }
-            }
-            request_data["CompositeRequest"]["operations"]["operation"].append(data_operation)
-
-            # MeasureAttribute operations - excluding operator field
-            columns = [col for col in ERPAPIUtil.get_attribute_columns() if col != 'operator']
-            for column in columns:
-                if column in measurement_data and measurement_data[column] is not None:
-                    attr_operation = {
-                        "TargetPort": "createData",
-                        "ModelCRUD": {
-                            "serviceType": "setMeasureAttribute",
-                            "TableName": "MeasureAttribute",
-                            "RecordID": 0,
-                            "Action": "Create",
-                            "DataRow": {
-                                "field": [
-                                    {"@column": "AttributeName", "val": column},
-                                    {"@column": "AttributeValue", "val": str(measurement_data[column])},
-                                    {"@column": "MeasuredData_ID", "val": "@MeasuredData.MeasuredData_ID"}
-                                ]
-                            }
+        for key, value in measurement_data.items():
+            if key not in ['timestamp', 'operator'] and isinstance(value, (int, float)):
+                # Add measurement data
+                data_operation = {
+                    "TargetPort": "createData",
+                    "ModelCRUD": {
+                        "serviceType": "setMeasureData",
+                        "TableName": "MeasuredData",
+                        "RecordID": 0,
+                        "Action": "Create",
+                        "DataRow": {
+                            "field": [
+                                {"@column": "DataName", "val": measurement_data['field_name']},
+                                {"@column": "DataValue", "val": "{:.6f}".format(measurement_data['value'])},
+                                {"@column": "Measure_ID", "val": "@Measure.Measure_id"},
+                                {"@column": "Name", "val": measurement_data['field_name']}
+                            ]
                         }
                     }
-                    request_data["CompositeRequest"]["operations"]["operation"].append(attr_operation)
+                }
+                request_data["CompositeRequest"]["operations"]["operation"].append(data_operation)
+
+        # Add MeasureAttribute operations
+        columns = [col for col in ERPAPIUtil.get_attribute_columns() if col != 'operator']
+        for column in columns:
+            if column in measurement_data and measurement_data[column] is not None:
+                attr_operation = {
+                    "TargetPort": "createData",
+                    "ModelCRUD": {
+                        "serviceType": "setMeasureAttribute",
+                        "TableName": "MeasureAttribute",
+                        "RecordID": 0,
+                        "Action": "Create",
+                        "DataRow": {
+                            "field": [
+                                {"@column": "AttributeName", "val": column},
+                                {"@column": "AttributeValue", "val": str(measurement_data[column])},
+                                {"@column": "MeasuredData_ID", "val": "@MeasuredData.MeasuredData_ID"}
+                            ]
+                        }
+                    }
+                }
+                request_data["CompositeRequest"]["operations"]["operation"].append(attr_operation)
 
         return request_data
 
