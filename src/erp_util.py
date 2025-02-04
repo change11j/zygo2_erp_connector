@@ -76,6 +76,7 @@ class ERPAPIUtil:
 
     @staticmethod
     def create_measure_request(sample_name, group_name, position_name, measurement_data):
+        """Create measurement data request - all operations in one request"""
         try:
             appx_filename = mx.get_application_path() or "Unknown.appx"
         except:
@@ -91,7 +92,7 @@ class ERPAPIUtil:
             }
         }
 
-        # Add single measure record
+        # 第一個操作: 建立 Measure
         measure_operation = {
             "TargetPort": "createData",
             "ModelCRUD": {
@@ -112,10 +113,10 @@ class ERPAPIUtil:
         }
         request_data["CompositeRequest"]["operations"]["operation"].append(measure_operation)
 
-        # Get measurement fields and attributes
-        for key, value in measurement_data.items():
-            if key not in ['timestamp', 'operator'] and isinstance(value, (int, float)):
-                # Add measurement data
+        # 第二部分: 建立所有 MeasuredData
+        data_operations = []
+        for field_name, value in measurement_data.items():
+            if field_name not in ['timestamp', 'operator'] and isinstance(value, (int, float)):
                 data_operation = {
                     "TargetPort": "createData",
                     "ModelCRUD": {
@@ -125,37 +126,40 @@ class ERPAPIUtil:
                         "Action": "Create",
                         "DataRow": {
                             "field": [
-                                {"@column": "DataName", "val": measurement_data['field_name']},
-                                {"@column": "DataValue", "val": "{:.6f}".format(measurement_data['value'])},
+                                {"@column": "DataName", "val": field_name},
+                                {"@column": "DataValue", "val": "{0:.6f}".format(value)},
                                 {"@column": "Measure_ID", "val": "@Measure.Measure_id"},
-                                {"@column": "Name", "val": measurement_data['field_name']}
+                                {"@column": "Name", "val": field_name}
                             ]
                         }
                     }
                 }
                 request_data["CompositeRequest"]["operations"]["operation"].append(data_operation)
+                data_operations.append(data_operation)
 
-        # Add MeasureAttribute operations
-        columns = [col for col in ERPAPIUtil.get_attribute_columns() if col != 'operator']
-        for column in columns:
-            if column in measurement_data and measurement_data[column] is not None:
-                attr_operation = {
-                    "TargetPort": "createData",
-                    "ModelCRUD": {
-                        "serviceType": "setMeasureAttribute",
-                        "TableName": "MeasureAttribute",
-                        "RecordID": 0,
-                        "Action": "Create",
-                        "DataRow": {
-                            "field": [
-                                {"@column": "AttributeName", "val": column},
-                                {"@column": "AttributeValue", "val": str(measurement_data[column])},
-                                {"@column": "MeasuredData_ID", "val": "@MeasuredData.MeasuredData_ID"}
-                            ]
+                # 第三部分: 建立該 MeasuredData 的所有 Attributes
+                columns = [col for col in ERPAPIUtil.get_attribute_columns() if col != 'operator']
+                data_index = len(data_operations) - 1
+                for column in columns:
+                    if column in measurement_data:
+                        attr_operation = {
+                            "TargetPort": "createData",
+                            "ModelCRUD": {
+                                "serviceType": "setMeasureAttribute",
+                                "TableName": "MeasureAttribute",
+                                "RecordID": 0,
+                                "Action": "Create",
+                                "DataRow": {
+                                    "field": [
+                                        {"@column": "AttributeName", "val": column},
+                                        {"@column": "AttributeValue", "val": str(measurement_data[column])},
+                                        {"@column": "MeasuredData_ID",
+                                         "val": "@MeasuredData[{0}].MeasuredData_ID".format(data_index)}
+                                    ]
+                                }
+                            }
                         }
-                    }
-                }
-                request_data["CompositeRequest"]["operations"]["operation"].append(attr_operation)
+                        request_data["CompositeRequest"]["operations"]["operation"].append(attr_operation)
 
         return request_data
 
