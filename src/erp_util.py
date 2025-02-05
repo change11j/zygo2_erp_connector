@@ -75,98 +75,104 @@ class ERPAPIUtil:
             return False, str(e)
 
     @staticmethod
-    def create_measure_request(sample_name, group_name, position_name, measurement_data):
+    def create_measure_request(sample_name, group_name, position_name, measurement_data_list):
+        """Create measurement data request - all operations in one request"""
         try:
-            appx_filename = mx.get_application_path() or "Unknown.appx"
-        except:
-            appx_filename = "Unknown.appx"
+            # 获取 measure 基本信息
+            measure_data = measurement_data_list[0] if measurement_data_list else {}
+            try:
+                appx_filename = mx.get_application_path() or "Unknown.appx"
+            except:
+                appx_filename = "Unknown.appx"
 
-        request_data = {
-            "CompositeRequest": {
-                "ADLoginRequest": ERPConfig.LOGIN_INFO,
-                "serviceType": "setMeasureDataSet",
-                "operations": {
-                    "operation": []
-                }
-            }
-        }
-
-        # Add single measure record
-        measure_operation = {
-            "TargetPort": "createData",
-            "ModelCRUD": {
-                "serviceType": "setMeasure",
-                "TableName": "Measure",
-                "RecordID": 0,
-                "Action": "Create",
-                "DataRow": {
-                    "field": [
-                        {"@column": "APPXFileName", "val": appx_filename},
-                        {"@column": "GroupName", "val": group_name},
-                        {"@column": "SampleName", "val": sample_name},
-                        {"@column": "PositionName", "val": position_name},
-                        {"@column": "operator", "val": measurement_data.get("operator", "Unknown")}
-                    ]
-                }
-            }
-        }
-        request_data["CompositeRequest"]["operations"]["operation"].append(measure_operation)
-
-        # Get measurement fields and attributes
-        for key, value in measurement_data.items():
-            if key not in ['timestamp', 'operator'] and isinstance(value, (int, float)):
-                # Add measurement data
-                data_operation = {
-                    "TargetPort": "createData",
-                    "ModelCRUD": {
-                        "serviceType": "setMeasureData",
-                        "TableName": "MeasuredData",
-                        "RecordID": 0,
-                        "Action": "Create",
-                        "DataRow": {
-                            "field": [
-                                {"@column": "DataName", "val": measurement_data['field_name']},
-                                {"@column": "DataValue", "val": "{:.6f}".format(measurement_data['value'])},
-                                {"@column": "Measure_ID", "val": "@Measure.Measure_id"},
-                                {"@column": "Name", "val": measurement_data['field_name']}
-                            ]
-                        }
+            request_data = {
+                "CompositeRequest": {
+                    "ADLoginRequest": ERPConfig.LOGIN_INFO,
+                    "serviceType": "setMeasureDataSet",
+                    "operations": {
+                        "operation": []
                     }
                 }
-                request_data["CompositeRequest"]["operations"]["operation"].append(data_operation)
+            }
 
-        # Add MeasureAttribute operations
-        columns = [col for col in ERPAPIUtil.get_attribute_columns() if col != 'operator']
-        for column in columns:
-            if column in measurement_data and measurement_data[column] is not None:
-                attr_operation = {
-                    "TargetPort": "createData",
-                    "ModelCRUD": {
-                        "serviceType": "setMeasureAttribute",
-                        "TableName": "MeasureAttribute",
-                        "RecordID": 0,
-                        "Action": "Create",
-                        "DataRow": {
-                            "field": [
-                                {"@column": "AttributeName", "val": column},
-                                {"@column": "AttributeValue", "val": str(measurement_data[column])},
-                                {"@column": "MeasuredData_ID", "val": "@MeasuredData.MeasuredData_ID"}
-                            ]
-                        }
+            # 1. 首先创建 Measure 记录
+            measure_operation = {
+                "TargetPort": "createData",
+                "ModelCRUD": {
+                    "serviceType": "setMeasure",
+                    "TableName": "Measure",
+                    "RecordID": 0,
+                    "Action": "Create",
+                    "DataRow": {
+                        "field": [
+                            {"@column": "APPXFileName", "val": appx_filename},
+                            {"@column": "GroupName", "val": group_name},
+                            {"@column": "SampleName", "val": sample_name},
+                            {"@column": "PositionName", "val": position_name},
+                            {"@column": "operator", "val": measure_data.get("operator", "Unknown")}
+                        ]
                     }
                 }
-                request_data["CompositeRequest"]["operations"]["operation"].append(attr_operation)
+            }
+            request_data["CompositeRequest"]["operations"]["operation"].append(measure_operation)
 
-        return request_data
+            # 2. 添加所有的 MeasuredData 记录
+            for data in measurement_data_list:
+                if 'field_name' in data and 'value' in data:
+                    # 添加测量数据
+                    measured_data_operation = {
+                        "TargetPort": "createData",
+                        "ModelCRUD": {
+                            "serviceType": "setMeasureData",
+                            "TableName": "MeasuredData",
+                            "RecordID": 0,
+                            "Action": "Create",
+                            "DataRow": {
+                                "field": [
+                                    {"@column": "DataName", "val": data['field_name']},
+                                    {"@column": "DataValue", "val": "{:.6f}".format(data['value'])},
+                                    {"@column": "Measure_ID", "val": "@Measure.Measure_id"},
+                                    {"@column": "Name", "val": data['field_name']}
+                                ]
+                            }
+                        }
+                    }
+                    request_data["CompositeRequest"]["operations"]["operation"].append(measured_data_operation)
+
+                    # 3. 对每个 MeasuredData 添加其 Attributes
+                    for attr_name, attr_value in data.get('attributes', {}).items():
+                        attribute_operation = {
+                            "TargetPort": "createData",
+                            "ModelCRUD": {
+                                "serviceType": "setMeasureAttribute",
+                                "TableName": "MeasureAttribute",
+                                "RecordID": 0,
+                                "Action": "Create",
+                                "DataRow": {
+                                    "field": [
+                                        {"@column": "AttributeName", "val": attr_name},
+                                        {"@column": "AttributeValue", "val": str(attr_value)},
+                                        {"@column": "MeasuredData_ID", "val": "@MeasuredData.MeasuredData_ID"}
+                                    ]
+                                }
+                            }
+                        }
+                        request_data["CompositeRequest"]["operations"]["operation"].append(attribute_operation)
+
+            return request_data
+
+        except Exception as e:
+            logging.error("Error creating measure request: %s", str(e))
+            return None
 
     @staticmethod
-    def upload_measurement(sample_name, group_name, position_name, measurement_data):
+    def upload_measurement(sample_name, group_name, position_name, measurement_data_list):
         try:
-            request_data = ERPAPIUtil.create_measure_request(  # 改為直接調用
+            request_data = ERPAPIUtil.create_measure_request(
                 sample_name,
                 group_name,
                 position_name,
-                measurement_data
+                measurement_data_list
             )
             return ERPAPIUtil.send_to_erp(request_data)
         except Exception as e:

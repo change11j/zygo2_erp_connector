@@ -5,6 +5,7 @@ import json
 import sqlite3
 from datetime import datetime
 from logging import fatal
+from zygo import mx
 
 
 class SettingsManager(object):
@@ -14,51 +15,56 @@ class SettingsManager(object):
         self.load_current_settings()
 
     def initialize_database(self):
-        """初始化數據庫"""
+        """初始化資料庫"""
         try:
             self.conn = sqlite3.connect(self.db_path)
             self.cursor = self.conn.cursor()
 
-            # 創建measurements表
+            # 创建 Measure 表
             self.cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS measurements (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            sample_name TEXT NOT NULL,
-                            position_name TEXT NOT NULL,
-                            group_name TEXT NOT NULL,
-                            operator TEXT NOT NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                    """)
-
-            # 創建measurement_params表來儲存參數
-            self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS measurement_params (
+                CREATE TABLE IF NOT EXISTS measures (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    measurement_id INTEGER,
-                    param_name TEXT NOT NULL,
-                    param_value TEXT NOT NULL,
-                    FOREIGN KEY (measurement_id) REFERENCES measurements(id)
+                    sample_name TEXT NOT NULL,
+                    position_name TEXT NOT NULL,
+                    group_name TEXT NOT NULL,
+                    operator TEXT NOT NULL,
+                    appx_filename TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
-            # 創建measurement_fields表來儲存欄位設置
+            # 创建 MeasuredData 表
             self.cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS measurement_fields (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        measurement_id INTEGER,
-                        field_name TEXT NOT NULL,
-                        identity_path TEXT NOT NULL,
-                        FOREIGN KEY (measurement_id) REFERENCES measurements(id)
-                    )
-                """)
+                CREATE TABLE IF NOT EXISTS measured_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    measure_id INTEGER,
+                    data_name TEXT NOT NULL,
+                    data_value REAL NOT NULL,
+                    identity_path TEXT NOT NULL,
+                    FOREIGN KEY (measure_id) REFERENCES measures(id)
+                )
+            """)
+
+            # 创建 MeasureAttribute 表
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS measure_attributes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    measured_data_id INTEGER,
+                    attribute_name TEXT NOT NULL,
+                    attribute_value TEXT NOT NULL,
+                    FOREIGN KEY (measured_data_id) REFERENCES measured_data(id)
+                )
+            """)
 
             self.conn.commit()
             print("Database initialized successfully")
 
+
+
         except Exception as e:
             print("Database initialization error: {0}".format(str(e)))
             raise
+
 
     def save_measurement_field(self, field_name, field_unit, identity_path, group_name):
         """保存量測欄位設置"""
@@ -114,92 +120,157 @@ class SettingsManager(object):
             return []
 
     def load_current_settings(self):
+        """从数据库加载最新设置，过滤掉不需要在UI显示的字段"""
         try:
-            self.cursor.execute("""
-                SELECT m.id, m.sample_name, m.position_name, m.group_name, m.operator,
-                       mf.field_name, mf.identity_path,
-                       mp.param_name, mp.param_value
-                FROM measurements m
-                LEFT JOIN measurement_fields mf ON m.id = mf.measurement_id
-                LEFT JOIN measurement_params mp ON m.id = mp.measurement_id
-                WHERE m.id = (SELECT MAX(id) FROM measurements)
-            """)
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
 
-            rows = self.cursor.fetchall()
-            if not rows:
-                return None
+                # 获取最新的 measure 记录
+                c.execute("""
+                    SELECT id, sample_name, position_name, group_name, operator
+                    FROM measures 
+                    ORDER BY id DESC LIMIT 1
+                """)
 
-            settings = {
-                "sample_name": rows[0][1],
-                "position_name": rows[0][2],
-                "group_name": rows[0][3],
-                "operator": rows[0][4],
-                "measurement_fields": []
-            }
+                measure_row = c.fetchone()
+                if not measure_row:
+                    return None
 
-            # 處理量測欄位
-            fields_seen = set()
-            for row in rows:
-                if row[5] and row[6] and (row[5], row[6]) not in fields_seen:
-                    settings["measurement_fields"].append({
-                        "name": row[5],
-                        "path": row[6]
-                    })
-                    fields_seen.add((row[5], row[6]))
+                measure_id, sample_name, position_name, group_name, operator = measure_row
 
-            # 處理SOP參數
-            for row in rows:
-                if row[7] and row[8]:
-                    settings[row[7]] = row[8]
+                # 构建基本设置 (不包含 appx_filename)
+                settings = {
+                    "sample_name": sample_name,
+                    "position_name": position_name,
+                    "group_name": group_name,
+                    "operator": operator,
+                    "measurement_fields": []
+                }
 
-            return settings
+                # 获取所有 measured_data
+                c.execute("""
+                    SELECT id, data_name, identity_path 
+                    FROM measured_data
+                    WHERE measure_id = ?
+                """, (measure_id,))
+
+                for data_row in c.fetchall():
+                    data_id, data_name, identity_path = data_row
+
+                    # 获取该 measured_data 的所有 attributes
+                    c.execute("""
+                        SELECT attribute_name, attribute_value
+                        FROM measure_attributes
+                        WHERE measured_data_id = ?
+                    """, (data_id,))
+
+                    # 添加量测字段
+                    field = {
+                        "name": data_name,
+                        "path": identity_path
+                    }
+                    settings["measurement_fields"].append(field)
+
+                    # 添加 attributes 到设置中
+                    # 过滤掉不需要显示的字段
+                    for attr_name, attr_value in c.fetchall():
+                        if attr_name not in ['appx_filename']:  # 在这里过滤掉不需要显示的字段
+                            settings[attr_name] = attr_value
+
+                return settings
 
         except Exception as e:
-            print("Error loading settings: {0}".format(str(e)))
+            print("Error loading settings: %s", str(e))
             return None
 
-    def save_settings(self, sample_name, position_name, group_name, params=None):
-        """保存設置到數據庫"""
+    def import_settings(self, file_path):
+        """导入设置"""
         try:
-            # 插入基本信息
-            self.cursor.execute("""
-                INSERT INTO measurements 
-                (sample_name, position_name, group_name, operator)
-                VALUES (?, ?, ?, ?)
-            """, (
-                sample_name,
-                position_name,
-                group_name,
-                params.get("operator", "")  # operator 從 params 取得
-            ))
+            with open(file_path, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
 
-            measurement_id = self.cursor.lastrowid
+            # 打印导入的设置内容
+            print("Importing settings:", settings)
 
-            # 插入量測欄位
-            measurement_fields = params.get("measurement_fields", [])
-            for field in measurement_fields:
-                self.cursor.execute("""
-                    INSERT INTO measurement_fields 
-                    (measurement_id, field_name, identity_path)
-                    VALUES (?, ?, ?)
-                """, (measurement_id, field["name"], field["path"]))
+            # 验证必要字段
+            required_fields = ["sample_name", "position_name", "group_name", "operator"]
+            for field in required_fields:
+                if field not in settings:
+                    settings[field] = ""
 
-            # 插入其他參數
-            for name, value in params.items():
-                if name not in ["measurement_fields", "parameter_name", "group_name"]:
-                    self.cursor.execute("""
-                        INSERT INTO measurement_params 
-                        (measurement_id, param_name, param_value)
-                        VALUES (?, ?, ?)
-                    """, (measurement_id, name, str(value)))
+            # 获取 appx_filename
+            try:
+                appx_filename = mx.get_application_path() or "Unknown.appx"
+            except:
+                appx_filename = "Unknown.appx"
 
-            self.conn.commit()
-            return self
+            # 准备参数字典
+            params = {}
+            params["measurement_fields"] = settings.get("measurement_fields", [])
+
+            # 添加其他参数
+            for key, value in settings.items():
+                if key not in ["sample_name", "position_name", "group_name",
+                               "operator", "measurement_fields", "appx_filename"]:
+                    params[key] = value
+
+            # 调用 save_settings
+            return self.save_settings(
+                settings["sample_name"],
+                settings["position_name"],
+                settings["group_name"],
+                settings["operator"],
+                appx_filename,
+                params
+            )
 
         except Exception as e:
-            print("Error saving settings: {0}".format(str(e)))
-            self.conn.rollback()
-            return
+            print("Error importing settings: {0}".format(str(e)))
+            return False
+
+    def save_settings(self, sample_name, position_name, group_name, operator,
+                      appx_filename, params):
+        """保存设置到数据库"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+
+                # 插入 Measure
+                c.execute("""
+                    INSERT INTO measures 
+                    (sample_name, position_name, group_name, operator, appx_filename)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (sample_name, position_name, group_name, operator, appx_filename))
+
+                measure_id = c.lastrowid
+
+                # 插入 MeasuredData
+                for field in params.get("measurement_fields", []):
+                    c.execute("""
+                        INSERT INTO measured_data
+                        (measure_id, data_name, data_value, identity_path)
+                        VALUES (?, ?, ?, ?)
+                    """, (measure_id, field["name"], 0.0, field["path"]))
+
+                    measured_data_id = c.lastrowid
+
+                    # 插入 MeasureAttribute
+                    for attr_name, attr_value in params.items():
+                        if attr_name not in ["measurement_fields"]:
+                            c.execute("""
+                                INSERT INTO measure_attributes
+                                (measured_data_id, attribute_name, attribute_value)
+                                VALUES (?, ?, ?)
+                            """, (measured_data_id, attr_name, str(attr_value)))
+
+                conn.commit()
+                return True
+
+        except Exception as e:
+            print("Error saving settings:", str(e))
+            if 'conn' in locals():
+                conn.rollback()
+            return False
 
     def export_settings(self, file_path):
         """導出設置到JSON文件"""
@@ -214,41 +285,7 @@ class SettingsManager(object):
             print("Error exporting settings: {0}".format(str(e)))
             return False
 
-    def import_settings(self, file_path):
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:  # 添加 encoding
-                settings = json.load(f)
 
-            # 在調用 save_settings 前先打印看看內容
-            print("Importing settings:", settings)
-
-            # 驗證必要欄位
-            required_fields = ["sample_name", "position_name", "group_name"]
-            if not all(field in settings for field in required_fields):
-                print("Missing required fields")
-                return False
-
-            # 準備參數
-            params = {}
-            params["operator"] = settings.get("operator", "")
-            params["measurement_fields"] = settings.get("measurement_fields", [])
-
-            # 其他參數
-            for k, v in settings.items():
-                if k not in required_fields + ["operator", "measurement_fields"]:
-                    params[k] = v
-
-            # 調用 save_settings
-            return self.save_settings(
-                settings["sample_name"],
-                settings["position_name"],
-                settings["group_name"],
-                params
-            )
-
-        except Exception as e:
-            print("Error importing settings: {0}".format(str(e)))
-            return False
 
     def close(self):
         """關閉數據庫連接"""

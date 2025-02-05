@@ -1,6 +1,15 @@
 # monitor_and_upload.py
 from __future__ import print_function
 import sys
+print("Python version:", sys.version)
+print("Python path:", sys.path)
+
+# 添加zygo模組路徑
+zygo_path = 'C:\\projects\\zygo2_erp_connector'  # 調整為實際路徑
+if zygo_path not in sys.path:
+    sys.path.append(zygo_path)
+
+# 然後再導入zygo
 from zygo import ui, mx, connectionmanager
 from zygo.units import Units
 import time
@@ -21,16 +30,38 @@ class MeasurementMonitor:
         self.measurement_lock = threading.Lock()
         self.db_lock = threading.Lock()
         self.last_data = None
+        self.current_position = 0
+        self.settings_manager = SettingsManager()  # 增加这行
+
+    def _get_next_position(self):
+        """获取下一个点位编号"""
+        self.current_position += 1
+        return str(self.current_position)
 
     def _get_settings(self):
-        """Thread-safe settings retrieval"""
+        """Thread-safe settings retrieval with position management"""
         with self.db_lock:
-            settings_manager = SettingsManager()
             try:
-                settings = settings_manager.load_current_settings()
+                settings = self.settings_manager.load_current_settings()
+                if settings is None:
+                    settings = {}
+
+                # 如果没有点位，自动生成一个
+                if not settings.get('position_name'):
+                    settings['position_name'] = self._get_next_position()
+                else:
+                    # 如果有点位，更新 current_position
+                    try:
+                        self.current_position = int(settings['position_name'])
+                    except ValueError:
+                        self.current_position = 0
+                        settings['position_name'] = self._get_next_position()
+
                 return settings
-            finally:
-                settings_manager.close()
+            except Exception as e:
+                logging.error("Error getting settings: %s", str(e))
+                return None
+
 
     def _check_settings(self, settings):
         """Validate settings"""
@@ -56,19 +87,20 @@ class MeasurementMonitor:
             return False
 
     def get_measurement_data(self, settings):
-        """收集所有測量欄位的數據"""
+        """收集所有测量字段的数据"""
         base_data = {
             'operator': settings.get('operator', 'Unknown'),
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
         }
 
-        # 加入 SOP 參數（這些將成為 attributes）
-        attributes = {}
+        # 收集 SOP 参数作为 attributes
+        sop_params = {}
         for key, value in settings.items():
-            if key not in ['sample_name', 'group_name', 'position_name', 'operator', 'measurement_fields', 'timestamp']:
-                attributes[key] = value
+            if key not in ['sample_name', 'group_name', 'position_name',
+                           'operator', 'measurement_fields', 'timestamp']:
+                sop_params[key] = value
 
-        # 收集所有測量點的數據
+        # 收集测量数据
         measurement_results = []
         has_changes = False
 
@@ -83,28 +115,25 @@ class MeasurementMonitor:
                 value = mx.get_result_number(path, Units.MicroMeters)
 
                 if value is not None:
-                    # 為每個測量點創建數據集
-                    field_data = {
+                    # 创建测量数据记录
+                    measurement_data = {
                         'field_name': field_name,
-                        'value': value
+                        'value': value,
+                        'attributes': sop_params.copy(),  # 每个测量数据都有相同的 SOP 参数作为属性
+                        'operator': base_data['operator']
                     }
-                    # 為每個測量點添加屬性
-                    for attr_name, attr_value in attributes.items():
-                        field_data[attr_name] = attr_value
 
-                    # 檢查是否有變化
                     if (self.last_data is None or
                             field_name not in self.last_data or
                             abs(self.last_data.get(field_name, 0) - value) > 1e-6):
                         has_changes = True
 
-                    measurement_results.append(field_data)
+                    measurement_results.append(measurement_data)
 
             except Exception as e:
-                logging.error("Error getting field %s: %s", field['name'], str(e))
+                logging.error("Error getting field %s: %s", field_name, str(e))
 
         if has_changes and measurement_results:
-            # 更新最後的數據
             self.last_data = {result['field_name']: result['value']
                               for result in measurement_results}
             return base_data, measurement_results
@@ -124,6 +153,18 @@ class MeasurementMonitor:
                     time.sleep(5)
                     continue
 
+                # 处理点位
+                if settings.get('position_name'):
+                    try:
+                        # 如果UI设置了点位，更新当前点位
+                        self.current_position = int(settings['position_name'])
+                    except ValueError:
+                        # 如果转换失败，从1开始
+                        self.current_position = 0
+                else:
+                    # 如果没有设置点位，使用自动递增的点位
+                    settings['position_name'] = self._get_next_position()
+
                 with self.measurement_lock:
                     data = self.get_measurement_data(settings)
                     if data:
@@ -131,6 +172,7 @@ class MeasurementMonitor:
 
                         # 打印基本信息
                         logging.info("New measurement data at: %s", base_data['timestamp'])
+                        logging.info("Position: %s", settings['position_name'])
 
                         # 打印每個測量點
                         for measurement in measurement_results:
@@ -147,6 +189,18 @@ class MeasurementMonitor:
                         # 上傳數據
                         self.upload_to_erp(data, settings)
 
+                        # 测量完成后更新点位
+                        settings['position_name'] = self._get_next_position()
+                        # 保存更新后的设置
+                        self.settings_manager.save_settings(
+                            settings["sample_name"],
+                            settings["position_name"],
+                            settings["group_name"],
+                            settings["operator"],
+                            settings.get("appx_filename", "Unknown.appx"),
+                            settings
+                        )
+
                 time.sleep(5)
 
             except Exception as e:
@@ -157,30 +211,44 @@ class MeasurementMonitor:
         """上傳所有測量點的數據"""
         base_data, measurements = data
 
+        # 組合完整的測量數據
+        measurement_data_list = []
         for measurement in measurements:
-            try:
-                # 組合完整的數據
-                full_data = base_data.copy()
-                full_data.update(measurement)
+            # 创建测量数据记录，包含必要的字段和属性
+            measurement_data = {
+                'field_name': measurement['field_name'],
+                'value': measurement['value'],
+                'operator': base_data.get('operator', 'Unknown'),
+                'attributes': {}  # 初始化 attributes 字典
+            }
 
-                success, error = ERPAPIUtil.upload_measurement(
-                    settings["sample_name"],
-                    settings["group_name"],
-                    settings["position_name"],
-                    full_data
-                )
+            # 添加所有 SOP 参数作为属性
+            for key, value in settings.items():
+                if key not in ['sample_name', 'group_name', 'position_name',
+                               'operator', 'measurement_fields', 'timestamp']:
+                    measurement_data['attributes'][key] = value
 
-                if success:
-                    logging.info("Successfully uploaded measurement: %s = %.6f um",
-                                 measurement['field_name'], measurement['value'])
-                else:
-                    logging.error("Failed to upload measurement %s: %s",
-                                  measurement['field_name'], error)
+            measurement_data_list.append(measurement_data)
 
-            except Exception as e:
-                logging.error("Error uploading measurement %s: %s",
-                              measurement['field_name'], str(e))
+        # 记录发送的数据用于调试
+        logging.info("Uploading measurement data: %s", str(measurement_data_list))
+
+        # 上傳所有測量點
+        success, error = ERPAPIUtil.upload_measurement(
+            settings["sample_name"],
+            settings["group_name"],
+            settings["position_name"],
+            measurement_data_list
+        )
+
+        if success:
+            logging.info("Successfully uploaded all measurements")
+        else:
+            logging.error("Failed to upload measurements: %s", error)
+
     def start(self):
+        # 在启动时重置点位
+        self.current_position = 0
         self.monitor_thread = threading.Thread(target=self.monitoring_thread)
         self.monitor_thread.daemon = True
         self.monitor_thread.start()

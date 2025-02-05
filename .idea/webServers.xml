@@ -10,7 +10,7 @@
         </fileTransfer>
       </webServer>
       <webServer id="4fdb1d0d-ac33-4f0f-baca-e048e8bc9669" name="zygo3">
-        <fileTransfer rootFolder="/C:/" accessType="SFTP" host="192.168.12.32" port="22" sshConfigId="e5e5e5c7-1871-463f-bb0c-81ff0ce9110d" sshConfig="zygo@192.168.12.32:22 key" keyPair="true">
+        <fileTransfer rootFolder="/C:/" accessType="SFTP" host="192.168.11.86" port="22" sshConfigId="e5e5e5c7-1871-463f-bb0c-81ff0ce9110d" sshConfig="zygo@192.168.11.86:22 key" keyPair="true">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>

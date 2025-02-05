@@ -15,20 +15,34 @@ class DatabaseManager(object):
         """初始化數據庫表"""
         with sqlite3.connect(self.db_path) as conn:
             c = conn.cursor()
-            # 設置表
-            c.execute('''CREATE TABLE IF NOT EXISTS settings
-                        (key TEXT PRIMARY KEY, value TEXT)''')
-            # 測量數據表
-            c.execute('''CREATE TABLE IF NOT EXISTS measurements
+
+            # Measure表 - 存储测量基本信息
+            c.execute('''CREATE TABLE IF NOT EXISTS measures
                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                         sample_name TEXT,
-                         parameter_name TEXT,
-                         position_name TEXT,
-                         measurement_data TEXT,
-                         erp_upload_status INTEGER DEFAULT 0,
-                         timestamp TEXT,
-                         datx_path TEXT,
-                         report_path TEXT)''')
+                         sample_name TEXT NOT NULL,
+                         position_name TEXT NOT NULL,
+                         group_name TEXT NOT NULL,
+                         operator TEXT NOT NULL,
+                         appx_filename TEXT NOT NULL,
+                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+
+            # MeasuredData表 - 存储测量数据
+            c.execute('''CREATE TABLE IF NOT EXISTS measured_data
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         measure_id INTEGER,
+                         data_name TEXT NOT NULL,
+                         data_value REAL NOT NULL,
+                         identity_path TEXT NOT NULL,
+                         FOREIGN KEY (measure_id) REFERENCES measures(id))''')
+
+            # MeasureAttribute表 - 存储SOP参数
+            c.execute('''CREATE TABLE IF NOT EXISTS measure_attributes
+                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                         measured_data_id INTEGER,
+                         attribute_name TEXT NOT NULL,
+                         attribute_value TEXT NOT NULL,
+                         FOREIGN KEY (measured_data_id) REFERENCES measured_data(id))''')
+
             conn.commit()
 
     def save_settings(self, sample_name, parameter_name, position_name):
