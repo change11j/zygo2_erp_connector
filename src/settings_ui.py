@@ -58,6 +58,8 @@ class SettingsUI(object):
         self.sample_name = ttk.Entry(info_frame)
         self.sample_name.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
 
+
+
         # 組別
         ttk.Label(info_frame, text="組別:").grid(row=1, column=0, sticky=tk.W, padx=5)
         self.group_name = ttk.Entry(info_frame)
@@ -72,6 +74,10 @@ class SettingsUI(object):
         ttk.Label(info_frame, text="操作人員:").grid(row=3, column=0, sticky=tk.W, padx=5)
         self.operator = ttk.Entry(info_frame)
         self.operator.grid(row=3, column=1, sticky=(tk.W, tk.E), padx=5)
+        # 試片編號
+        ttk.Label(info_frame, text="試片編號:").grid(row=4, column=0, sticky=tk.W, padx=5)
+        self.sample_number = ttk.Entry(info_frame)  # 改名為 sample_number
+        self.sample_number.grid(row=4, column=1, sticky=(tk.W, tk.E), padx=5)
 
         # 量測欄位區域
         field_frame = ttk.LabelFrame(main_frame, text="量測欄位", padding="5")
@@ -232,11 +238,10 @@ class SettingsUI(object):
             print("Error getting params: {}".format(str(e)))
         return params
 
-
-
     def load_latest_settings(self):
         settings = self.settings_manager.load_current_settings()
         if settings:
+            # 載入基本資訊欄位
             self.sample_name.delete(0, tk.END)
             self.sample_name.insert(0, settings.get("sample_name", ""))
 
@@ -249,13 +254,22 @@ class SettingsUI(object):
             self.operator.delete(0, tk.END)
             self.operator.insert(0, settings.get("operator", ""))
 
+            # 載入試片編號
+            self.sample_number.delete(0, tk.END)
+            self.sample_number.insert(0, settings.get("sample_number", ""))
+
             # 清除現有參數並載入
             self.param_entries.clear()
             for widget in self.params_frame.winfo_children():
                 widget.destroy()
 
+            # 只載入非系統欄位作為參數
+            excluded_fields = ["sample_name", "position_name", "group_name",
+                               "operator", "measurement_fields", "slide_id",
+                               "sample_number"]
+
             for name, value in settings.items():
-                if name not in ["sample_name", "position_name", "group_name", "operator", "measurement_fields"]:
+                if name not in excluded_fields:
                     self.add_param_entry(name, value)
 
             # 載入量測欄位
@@ -266,42 +280,49 @@ class SettingsUI(object):
 
     # settings_ui.py
     def save_settings(self):
-        settings = {
-            "sample_name": self.sample_name.get().strip(),
-            "group_name": self.group_name.get().strip(),
-            "position_name": self.position.get().strip(),
-            "operator": self.operator.get().strip(),
-            "measurement_fields": []
-        }
+        # 獲取基本信息
+        sample_name = self.sample_name.get().strip()
+        group_name = self.group_name.get().strip()
+        position_name = self.position.get().strip()
+        operator = self.operator.get().strip()
+        sample_number = self.sample_number.get().strip()
 
-        # 量測欄位
+        # 生成試片ID
+        import time
+        today = time.strftime("%Y%m%d")
+        slide_id = "{0}-{1}-{2}".format(
+            sample_name,
+            today,
+            sample_number
+        ) if sample_name and sample_number else ""
+
+        # 獲取量測欄位
+        measurement_fields = []
         for item in self.field_tree.get_children():
             values = self.field_tree.item(item)["values"]
-            settings["measurement_fields"].append({
+            measurement_fields.append({
                 "name": values[0],
                 "path": values[1]
             })
 
-        # SOP參數
+        # 只獲取 SOP 參數
         params = self.get_current_params()
-        for name, value in params.items():
-            settings[name] = value
+        params["measurement_fields"] = measurement_fields
 
-        # 保存為 JSON
-        import json
-        temp_json = "temp_settings.json"
         try:
-            with open(temp_json, "w", encoding="utf-8") as f:
-                json.dump(settings, f, indent=4, ensure_ascii=False)
-
-            if self.settings_manager.import_settings(temp_json):
-                return True
+            return self.settings_manager.save_settings(
+                sample_name,
+                position_name,
+                group_name,
+                operator,
+                "Unknown.appx",  # 或從mx獲取
+                slide_id,
+                sample_number,
+                params
+            )
         except Exception as e:
             print("Error saving settings: {}".format(e))
-        finally:
-            if os.path.exists(temp_json):
-                os.remove(temp_json)
-        return False
+            return False
 
     def export_settings(self):
         file_path = filedialog.asksaveasfilename(
@@ -315,8 +336,18 @@ class SettingsUI(object):
                 "group_name": self.group_name.get().strip(),
                 "position_name": self.position.get().strip(),
                 "operator": self.operator.get().strip(),
+                "sample_number": self.sample_number.get().strip(),  # 添加試片編號
                 "measurement_fields": []
             }
+
+            # 生成完整ID
+            import time
+            today = time.strftime("%Y%m%d")
+            settings["slide_id"] = "{0}-{1}-{2}".format(
+                settings["sample_name"],
+                today,
+                settings["sample_number"]
+            )
 
             for item in self.field_tree.get_children():
                 values = self.field_tree.item(item)["values"]

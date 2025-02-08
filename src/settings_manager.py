@@ -5,6 +5,8 @@ import json
 import sqlite3
 from datetime import datetime
 from logging import fatal
+from tkinter import messagebox
+
 from zygo import mx
 
 
@@ -44,6 +46,16 @@ class SettingsManager(object):
                     FOREIGN KEY (measure_id) REFERENCES measures(id)
                 )
             """)
+            # 檢查並添加新列
+            try:
+                self.cursor.execute("ALTER TABLE measures ADD COLUMN slide_id TEXT")
+            except:
+                pass  # 列已存在
+
+            try:
+                self.cursor.execute("ALTER TABLE measures ADD COLUMN sample_number TEXT")
+            except:
+                pass  # 列已存在
 
             # 创建 MeasureAttribute 表
             self.cursor.execute("""
@@ -127,23 +139,25 @@ class SettingsManager(object):
 
                 # 获取最新的 measure 记录
                 c.execute("""
-                    SELECT id, sample_name, position_name, group_name, operator
-                    FROM measures 
-                    ORDER BY id DESC LIMIT 1
-                """)
+                                SELECT id, sample_name, position_name, group_name, operator, slide_id, sample_number
+                                FROM measures 
+                                ORDER BY id DESC LIMIT 1
+                            """)
 
                 measure_row = c.fetchone()
                 if not measure_row:
                     return None
 
-                measure_id, sample_name, position_name, group_name, operator = measure_row
+                measure_id, sample_name, position_name, group_name, operator, slide_id, sample_number = measure_row
 
-                # 构建基本设置 (不包含 appx_filename)
+                # 构建基本设置
                 settings = {
                     "sample_name": sample_name,
                     "position_name": position_name,
                     "group_name": group_name,
                     "operator": operator,
+                    "slide_id": slide_id,  # 完整ID
+                    "sample_number": sample_number,  # 試片編號
                     "measurement_fields": []
                 }
 
@@ -174,7 +188,7 @@ class SettingsManager(object):
                     # 添加 attributes 到设置中
                     # 过滤掉不需要显示的字段
                     for attr_name, attr_value in c.fetchall():
-                        if attr_name not in ['appx_filename']:  # 在这里过滤掉不需要显示的字段
+                        if attr_name not in ['appx_filename','slide_id']:  # 在这里过滤掉不需要显示的字段
                             settings[attr_name] = attr_value
 
                 return settings
@@ -183,20 +197,12 @@ class SettingsManager(object):
             print("Error loading settings: %s", str(e))
             return None
 
+    # 在 settings_manager.py 中修改 import_settings 方法:
     def import_settings(self, file_path):
         """导入设置"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
-
-            # 打印导入的设置内容
-            print("Importing settings:", settings)
-
-            # 验证必要字段
-            required_fields = ["sample_name", "position_name", "group_name", "operator"]
-            for field in required_fields:
-                if field not in settings:
-                    settings[field] = ""
 
             # 获取 appx_filename
             try:
@@ -204,23 +210,40 @@ class SettingsManager(object):
             except:
                 appx_filename = "Unknown.appx"
 
-            # 准备参数字典
+            # 生成 slide_id (如果需要)
+            import time
+            today = time.strftime("%Y%m%d")
+            sample_name = settings.get("sample_name", "")
+            sample_number = settings.get("sample_number", "")
+            slide_id = "{0}-{1}-{2}".format(
+                sample_name,
+                today,
+                sample_number
+            ) if sample_name and sample_number else ""
+
+            # 準備 SOP 參數
             params = {}
             params["measurement_fields"] = settings.get("measurement_fields", [])
 
-            # 添加其他参数
+            # 添加其他參數(除了基本信息外都是 SOP 參數)
+            excluded_fields = [
+                "sample_name", "position_name", "group_name",
+                "operator", "measurement_fields", "slide_id",
+                "sample_number", "appx_filename"
+            ]
             for key, value in settings.items():
-                if key not in ["sample_name", "position_name", "group_name",
-                               "operator", "measurement_fields", "appx_filename"]:
+                if key not in excluded_fields:
                     params[key] = value
 
-            # 调用 save_settings
+            # 調用 save_settings
             return self.save_settings(
-                settings["sample_name"],
-                settings["position_name"],
-                settings["group_name"],
-                settings["operator"],
+                settings.get("sample_name", ""),
+                settings.get("position_name", ""),
+                settings.get("group_name", ""),
+                settings.get("operator", ""),
                 appx_filename,
+                slide_id,
+                sample_number,
                 params
             )
 
@@ -229,7 +252,7 @@ class SettingsManager(object):
             return False
 
     def save_settings(self, sample_name, position_name, group_name, operator,
-                      appx_filename, params):
+                      appx_filename, slide_id, sample_number, params):
         """保存设置到数据库"""
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -238,9 +261,18 @@ class SettingsManager(object):
                 # 插入 Measure
                 c.execute("""
                     INSERT INTO measures 
-                    (sample_name, position_name, group_name, operator, appx_filename)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (sample_name, position_name, group_name, operator, appx_filename))
+                    (sample_name, position_name, group_name, operator, 
+                     appx_filename, slide_id, sample_number)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    sample_name,
+                    position_name,
+                    group_name,
+                    operator,
+                    appx_filename,
+                    slide_id,
+                    sample_number
+                ))
 
                 measure_id = c.lastrowid
 
@@ -254,9 +286,9 @@ class SettingsManager(object):
 
                     measured_data_id = c.lastrowid
 
-                    # 插入 MeasureAttribute
+                    # 只插入 SOP 參數
                     for attr_name, attr_value in params.items():
-                        if attr_name not in ["measurement_fields"]:
+                        if attr_name != "measurement_fields":  # 移除過濾條件,只要不是measurement_fields都保存
                             c.execute("""
                                 INSERT INTO measure_attributes
                                 (measured_data_id, attribute_name, attribute_value)
@@ -273,17 +305,34 @@ class SettingsManager(object):
             return False
 
     def export_settings(self, file_path):
-        """導出設置到JSON文件"""
+        settings = {
+            "sample_name": self.sample_name.get().strip(),
+            "group_name": self.group_name.get().strip(),
+            "position_name": self.position.get().strip(),
+            "operator": self.operator.get().strip(),
+            "sample_number": self.sample_number.get().strip(),
+            "measurement_fields": []
+        }
+
+        # 添加量測欄位
+        for item in self.field_tree.get_children():
+            values = self.field_tree.item(item)["values"]
+            settings["measurement_fields"].append({
+                "name": values[0],
+                "path": values[1]
+            })
+
+        # 添加 SOP 參數
+        params = self.get_current_params()
+        for name, value in params.items():
+            settings[name] = value
+
         try:
-            settings = self.save_settings()
-            if settings:
-                with open(file_path, 'w') as f:
-                    json.dump(settings, f, indent=4, ensure_ascii=False)
-                return True
-            return False
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=4, ensure_ascii=False)
+            messagebox.showinfo("成功", "設置已導出")
         except Exception as e:
-            print("Error exporting settings: {0}".format(str(e)))
-            return False
+            messagebox.showerror("錯誤", "導出失敗: {}".format(e))
 
 
 

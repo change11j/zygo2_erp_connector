@@ -88,21 +88,39 @@ class MeasurementMonitor:
 
     def get_measurement_data(self, settings):
         """收集所有测量字段的数据"""
+        logging.info("Settings received: %s", str(settings))
+
         base_data = {
+            'sample_name': settings.get('sample_name', ''),
+            'group_name': settings.get('group_name', ''),
+            'position_name': settings.get('position_name', ''),
             'operator': settings.get('operator', 'Unknown'),
+            'slide_id': settings.get('slide_id', ''),
+            'sample_number': settings.get('sample_number', ''),
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
         }
 
+
         # 收集 SOP 参数作为 attributes
         sop_params = {}
+        excluded_fields = [
+            'sample_name', 'group_name', 'position_name',
+            'operator', 'measurement_fields', 'timestamp',
+            'slide_id', 'sample_number'
+        ]
         for key, value in settings.items():
-            if key not in ['sample_name', 'group_name', 'position_name',
-                           'operator', 'measurement_fields', 'timestamp']:
+            if key not in excluded_fields:
                 sop_params[key] = value
+
 
         # 收集测量数据
         measurement_results = []
         has_changes = False
+
+        # 检查 measurement_fields 是否存在
+        if 'measurement_fields' not in settings:
+            logging.error("No measurement fields found in settings")
+            return None
 
         for field in settings.get('measurement_fields', []):
             try:
@@ -153,51 +171,50 @@ class MeasurementMonitor:
                     time.sleep(5)
                     continue
 
-                # 处理点位
-                if settings.get('position_name'):
-                    try:
-                        # 如果UI设置了点位，更新当前点位
-                        self.current_position = int(settings['position_name'])
-                    except ValueError:
-                        # 如果转换失败，从1开始
-                        self.current_position = 0
-                else:
-                    # 如果没有设置点位，使用自动递增的点位
-                    settings['position_name'] = self._get_next_position()
-
                 with self.measurement_lock:
                     data = self.get_measurement_data(settings)
                     if data:
-                        base_data, measurement_results = data
 
-                        # 打印基本信息
-                        logging.info("New measurement data at: %s", base_data['timestamp'])
-                        logging.info("Position: %s", settings['position_name'])
 
-                        # 打印每個測量點
-                        for measurement in measurement_results:
-                            if 'value' in measurement:
-                                logging.info("%s: %.6f um", measurement['field_name'], measurement['value'])
-
-                        # 打印屬性
-                        for key, value in base_data.items():
-                            if key not in ['timestamp', 'operator']:
-                                logging.info("%s: %s", key, value)
-
-                        logging.info("-" * 50)
+                        # 有數據時的處理邏輯...
 
                         # 上傳數據
                         self.upload_to_erp(data, settings)
 
-                        # 测量完成后更新点位
+                        # 測量完成后更新點位
                         settings['position_name'] = self._get_next_position()
-                        # 保存更新后的设置
+
+                        # 保存更新后的設置
                         self.settings_manager.save_settings(
                             settings["sample_name"],
                             settings["position_name"],
                             settings["group_name"],
                             settings["operator"],
                             settings.get("appx_filename", "Unknown.appx"),
+                            settings.get("slide_id", "Unknown.appx"),
+                            settings.get("sample_number", "Unknown.appx"),
+                            settings
+                        )
+                    else:
+                        # 當 get_measurement_data 返回 None 時
+                        # 重置點位為1
+                        # 試片編號初始化為1
+                        self.current_position = 0
+                        settings['sample_number'] = "1"
+                        settings['position_name'] = "1"
+
+
+
+
+                        # 保存更新的設置
+                        self.settings_manager.save_settings(
+                            settings["sample_name"],
+                            settings["position_name"],
+                            settings["group_name"],
+                            settings["operator"],
+                            settings.get("appx_filename", "Unknown.appx"),
+                            settings.get("slide_id", "Unknown.appx"),
+                            settings.get("sample_number", "Unknown.appx"),
                             settings
                         )
 
@@ -214,30 +231,20 @@ class MeasurementMonitor:
         # 組合完整的測量數據
         measurement_data_list = []
         for measurement in measurements:
-            # 创建测量数据记录，包含必要的字段和属性
-            measurement_data = {
-                'field_name': measurement['field_name'],
-                'value': measurement['value'],
-                'operator': base_data.get('operator', 'Unknown'),
-                'attributes': {}  # 初始化 attributes 字典
-            }
-
-            # 添加所有 SOP 参数作为属性
-            for key, value in settings.items():
-                if key not in ['sample_name', 'group_name', 'position_name',
-                               'operator', 'measurement_fields', 'timestamp']:
-                    measurement_data['attributes'][key] = value
-
-            measurement_data_list.append(measurement_data)
+            measurement_data_list.append(measurement)
 
         # 记录发送的数据用于调试
         logging.info("Uploading measurement data: %s", str(measurement_data_list))
 
         # 上傳所有測量點
         success, error = ERPAPIUtil.upload_measurement(
-            settings["sample_name"],
-            settings["group_name"],
-            settings["position_name"],
+            base_data["sample_name"],
+            base_data["position_name"],
+            base_data["group_name"],
+            base_data["operator"],
+            settings.get("appx_filename", "Unknown.appx"),
+            base_data["slide_id"],
+            base_data["sample_number"],
             measurement_data_list
         )
 

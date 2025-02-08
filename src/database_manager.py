@@ -18,13 +18,15 @@ class DatabaseManager(object):
 
             # Measure表 - 存储测量基本信息
             c.execute('''CREATE TABLE IF NOT EXISTS measures
-                        (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                         sample_name TEXT NOT NULL,
-                         position_name TEXT NOT NULL,
-                         group_name TEXT NOT NULL,
-                         operator TEXT NOT NULL,
-                         appx_filename TEXT NOT NULL,
-                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+                               (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                sample_name TEXT NOT NULL,
+                                position_name TEXT NOT NULL,
+                                group_name TEXT NOT NULL,
+                                operator TEXT NOT NULL,
+                                appx_filename TEXT NOT NULL,
+                                slide_id TEXT,
+                                sample_number TEXT,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
 
             # MeasuredData表 - 存储测量数据
             c.execute('''CREATE TABLE IF NOT EXISTS measured_data
@@ -72,14 +74,13 @@ class DatabaseManager(object):
 
     def save_measurement(self, sample_name, parameter_name, position_name,
                          measurement_data, datx_path=None, report_path=None):
-        """保存測量數據"""
         with sqlite3.connect(self.db_path) as conn:
             c = conn.cursor()
             c.execute("""
                 INSERT INTO measurements 
                 (sample_name, parameter_name, position_name, measurement_data, 
-                 timestamp, datx_path, report_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                 timestamp, datx_path, report_path, slide_id, sample_number)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 sample_name,
                 parameter_name,
@@ -87,7 +88,9 @@ class DatabaseManager(object):
                 json.dumps(measurement_data),
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 datx_path,
-                report_path
+                report_path,
+                measurement_data.get('slide_id', ''),
+                measurement_data.get('sample_number', '')
             ))
             conn.commit()
             return c.lastrowid

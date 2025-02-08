@@ -75,7 +75,8 @@ class ERPAPIUtil:
             return False, str(e)
 
     @staticmethod
-    def create_measure_request(sample_name, group_name, position_name, measurement_data_list):
+    def create_measure_request(sample_name, position_name, group_name, operator,
+                      appx_filename, slide_id, sample_number, measurement_data_list):
         """Create measurement data request - all operations in one request"""
         try:
             # 获取 measure 基本信息
@@ -109,7 +110,8 @@ class ERPAPIUtil:
                             {"@column": "GroupName", "val": group_name},
                             {"@column": "SampleName", "val": sample_name},
                             {"@column": "PositionName", "val": position_name},
-                            {"@column": "operator", "val": measure_data.get("operator", "Unknown")}
+                            {"@column": "operator", "val": operator},
+                            {"@column": "SlideID", "val": slide_id}  # 使用組合後的ID
                         ]
                     }
                 }
@@ -166,12 +168,12 @@ class ERPAPIUtil:
             return None
 
     @staticmethod
-    def upload_measurement(sample_name, group_name, position_name, measurement_data_list):
+    def upload_measurement(sample_name, position_name, group_name, operator,
+                      appx_filename, slide_id, sample_number, measurement_data_list):
         try:
             request_data = ERPAPIUtil.create_measure_request(
-                sample_name,
-                group_name,
-                position_name,
+                sample_name, position_name, group_name, operator,
+                appx_filename, slide_id, sample_number,
                 measurement_data_list
             )
             return ERPAPIUtil.send_to_erp(request_data)

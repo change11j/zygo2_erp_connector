@@ -3,7 +3,7 @@
   <component name="WebServers">
     <option name="servers">
       <webServer id="075d6c1c-8134-4834-b988-fec61a854f4e" name="zygo2">
-        <fileTransfer accessType="SFTP" host="192.168.11.132" port="22" sshConfigId="3dd83c5c-374a-43e3-945a-75505c5ae867" sshConfig="zygo@192.168.11.132:22 key" keyPair="true">
+        <fileTransfer accessType="SFTP" host="192.168.11.115" port="22" sshConfigId="3dd83c5c-374a-43e3-945a-75505c5ae867" sshConfig="zygo@192.168.11.115:22 key" keyPair="true">
           <advancedOptions>
             <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
           </advancedOptions>
