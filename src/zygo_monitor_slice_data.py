@@ -1,9 +1,34 @@
 from __future__ import print_function
 import os
-import json
+import sys
 from datetime import datetime
-from zygo import mx, ui
+import json
+# 設置正確的遠端zygo模組路徑
+REMOTE_ZYGO_PATH = 'C:/projects/zygo2_erp_connector'
+if REMOTE_ZYGO_PATH not in sys.path:
+    sys.path.append(REMOTE_ZYGO_PATH)
+
+# 確認Python能找到模組
+print("Python path:", sys.path)
+print("Current working directory:", os.getcwd())
+
+try:
+    from zygo.connectionmanager import connect, terminate
+    from zygo import ui, mx
+    from zygo.units import Units
+    print("Successfully imported zygo modules")
+except ImportError as e:
+    print(f"Failed to import zygo modules: {e}")
+    print("Checking if zygo directory exists:", os.path.exists('C:/projects/zygo2_erp_connector/zygo'))
+    sys.exit(1)
+
 from zygo.connectionmanager import connect, terminate
+zygo_path = 'C:\\projects\\zygo2_erp_connector'  # 調整為實際路徑
+if zygo_path not in sys.path:
+    sys.path.append(zygo_path)
+
+# 然後再導入zygo
+from zygo import ui, mx, connectionmanager
 from zygo.units import Units
 
 
