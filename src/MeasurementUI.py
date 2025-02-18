@@ -18,13 +18,13 @@ class MeasurementUI:
         self.main_frame.pack(fill="both", expand=True)
 
         # 基础信息区域
-        self.base_frame = ttk.LabelFrame(self.main_frame, text="Base Information")
+        self.base_frame = ttk.LabelFrame(self.main_frame, text="基本資訊")
         self.base_frame.pack(fill="x", padx=5, pady=5)
 
         # 基础信息标签
         self.base_info_labels = {}
         # 添加 SOP 参数区域
-        self.sop_frame = ttk.LabelFrame(self.main_frame, text="SOP Parameters")
+        self.sop_frame = ttk.LabelFrame(self.main_frame, text="製程參數")
         self.sop_frame.pack(fill="x", padx=5, pady=5)
 
         # 用于存储 SOP 参数标签的字典
@@ -85,7 +85,7 @@ class MeasurementUI:
 
         # 更新基础信息
         for i, (key, value) in enumerate(data['base_info'].items()):
-            if key != 'Updata':  # 跳过Updata字段
+            if key != 'Updata' and key in 'operator' 'groupName' "slide_id" "sample_number" :  # 跳过Updata字段
                 if key not in self.base_info_labels:
                     ttk.Label(self.base_frame, text=f"{key}:").grid(row=i // 3, column=(i % 3) * 2, sticky="e", padx=5)
                     self.base_info_labels[key] = ttk.Label(self.base_frame, text=value)
@@ -106,7 +106,7 @@ class MeasurementUI:
 
             # 更新 SOP 参数显示
             excluded_fields = [
-                'sample_name', 'group_name', 'position_name',
+                'sample_name', 'groupName', 'position_name',
                 'operator', 'measurement_fields', 'timestamp',
                 'slide_id', 'sample_number'
             ]
@@ -145,7 +145,9 @@ class MeasurementUI:
                 if is_error:
                     self.tree.item(item, tags=('error',))
 
-
+    def show_error_message(self, message):
+        """顯示錯誤訊息對話框"""
+        messagebox.showerror("錯誤", message)
 def start_ui(monitor):
     try:
         root = tk.Tk()
@@ -196,6 +198,7 @@ def start_ui(monitor):
 
                     if upload_error:
                         ui_data['timestamp'] = "* " + ui_data['timestamp']
+                        ui.show_error_message("上傳數據失敗，請檢查網路連接或聯繫管理員")
 
                     ui.update_display(ui_data, upload_error)
 

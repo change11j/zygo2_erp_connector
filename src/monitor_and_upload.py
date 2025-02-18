@@ -2,7 +2,13 @@
 from __future__ import print_function
 import sys
 
-import requests
+if sys.version_info[0] >= 3:
+    from urllib.request import Request, urlopen
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import urlencode
+else:
+    from urllib2 import Request, urlopen, HTTPError, URLError
+    from urllib import urlencode
 
 from MeasurementUI import start_ui, MeasurementUI
 
@@ -80,9 +86,12 @@ class MeasurementMonitor:
 
     def check_network(self):
         try:
-            response = requests.get("https://erp.topgiga.com.tw/", timeout=5)
+            response = urlopen("https://erp.topgiga.com.tw/", timeout=5)
             return True
-        except:
+        except (HTTPError, URLError):
+            return False
+        except Exception as e:
+            logging.error("Network check error: %s" % str(e))
             return False
     def connect_to_zygo(self):
         try:
@@ -95,7 +104,6 @@ class MeasurementMonitor:
 
     def get_measurement_data(self, settings):
         """收集所有测量字段的数据"""
-
         base_data = {
             'sample_name': settings.get('sample_name', ''),
             'group_name': settings.get('group_name', ''),
@@ -106,7 +114,6 @@ class MeasurementMonitor:
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
         }
 
-
         # 收集 SOP 参数作为 attributes
         sop_params = {}
         excluded_fields = [
@@ -114,28 +121,28 @@ class MeasurementMonitor:
             'operator', 'measurement_fields', 'timestamp',
             'slide_id', 'sample_number'
         ]
+
         for key, value in settings.items():
             if key not in excluded_fields:
                 sop_params[key] = value
-
-
-        # 收集测量数据
-        measurement_results = []
-        has_changes = False
 
         # 检查 measurement_fields 是否存在
         if 'measurement_fields' not in settings:
             logging.error("No measurement fields found in settings")
             return None
 
+        # 收集测量数据
+        changed_measurements = []
+        has_changes = False
+
         for field in settings.get('measurement_fields', []):
             try:
                 field_name = field['name']
-                cleaned_path = [
-                    segment.strip().strip('"').strip("'")
-                    for segment in field['path'].split(',')
-                ]
+                cleaned_path = []
+                for segment in field['path'].split(','):
+                    cleaned_path.append(segment.strip().strip('"').strip("'"))
                 path = tuple(cleaned_path)
+
                 value = mx.get_result_number(path, Units.MicroMeters)
 
                 if value is not None:
@@ -143,31 +150,44 @@ class MeasurementMonitor:
                     measurement_data = {
                         'field_name': field_name,
                         'value': value,
-                        'attributes': sop_params.copy(),  # 每个测量数据都有相同的 SOP 参数作为属性
+                        'attributes': dict(sop_params),  # 使用 dict() 替代 .copy()
                         'operator': base_data['operator']
                     }
 
-                    if (self.last_data is None or
-                            field_name not in self.last_data or
-                            abs(self.last_data.get(field_name, 0) - value) > 1e-6):
-                        has_changes = True
+                    # 判断是否有变化
+                    value_changed = False
+                    if self.last_data is None:
+                        value_changed = True
+                    elif field_name not in self.last_data:
+                        value_changed = True
+                    else:
+                        old_value = self.last_data.get(field_name, 0)
+                        if abs(old_value - value) > 1e-6:
+                            value_changed = True
 
-                    measurement_results.append(measurement_data)
+                    if value_changed:
+                        has_changes = True
+                        changed_measurements.append(measurement_data)
 
             except Exception as e:
-                logging.error("Error getting field %s: %s", field_name, str(e))
+                logging.error("Error getting field %s: %s" % (field_name, str(e)))
 
-        if has_changes and measurement_results:
-            self.last_data = {result['field_name']: result['value']
-                              for result in measurement_results}
-            self.new_data_available = True  # 设置新数据标志
+        if has_changes and changed_measurements:
+            # 更新 last_data，只包含有变化的值
+            new_last_data = {}
+            for measurement in changed_measurements:
+                new_last_data[measurement['field_name']] = measurement['value']
+            self.last_data = new_last_data
+            self.new_data_available = True
 
-            return base_data, measurement_results
+            return base_data, changed_measurements
 
-        logging.warning("No measurement data available")
         return None
 
     def monitoring_thread(self):
+        last_settings = None
+        important_fields = ["sample_name", "group_name", "slide_id", "sample_number"]
+
         while self.is_running:
             try:
                 if not hasattr(self, 'uid'):
@@ -180,20 +200,27 @@ class MeasurementMonitor:
                     time.sleep(5)
                     continue
 
+                # 检查重要设置是否变化
+                important_settings_changed = False
+                if last_settings is not None:
+                    for field in important_fields:
+                        if settings.get(field) != last_settings.get(field):
+                            important_settings_changed = True
+                            break
+
                 with self.measurement_lock:
                     data = self.get_measurement_data(settings)
-                    if data:
-                        # 先更新点位
+                    if data is not None:
+                        # 处理有新数据的情况
                         next_pos = self._get_next_position()
                         settings['position_name'] = next_pos
-                        # 尝试上传数据
                         success, error = self.upload_to_erp(data, settings)
                         self.last_upload_error = not success
-                        logging.info(next_pos)
-                        # 无论上传是否成功，都保存新的点位设置
+
+                        # 保存设置
                         self.settings_manager.save_settings(
                             settings["sample_name"],
-                            next_pos,  # 使用新点位
+                            next_pos,
                             settings["group_name"],
                             settings["operator"],
                             settings.get("appx_filename", "Unknown.appx"),
@@ -201,20 +228,13 @@ class MeasurementMonitor:
                             settings.get("sample_number", "Unknown.appx"),
                             settings
                         )
-                        logging.info(self.settings_manager.load_current_settings())
-                        self.new_data_available = True
-                    else:
-                        # 當 get_measurement_data 返回 None 時
-                        # 重置點位為1
-                        # 試片編號初始化為1
+                    elif important_settings_changed:
+                        # 只在重要设置改变时重置
                         self.current_position = 0
-                        settings['sample_number'] = "1"
                         settings['position_name'] = "1"
+                        settings['sample_number'] = "1"
 
-
-
-
-                        # 保存更新的設置
+                        # 保存重置后的设置
                         self.settings_manager.save_settings(
                             settings["sample_name"],
                             settings["position_name"],
@@ -226,12 +246,13 @@ class MeasurementMonitor:
                             settings
                         )
 
+                # 更新上一次的设置
+                last_settings = dict(settings)
                 time.sleep(5)
 
             except Exception as e:
-                logging.error("Error in monitoring thread: %s", str(e))
+                logging.error("Error in monitoring thread: %s" % str(e))
                 time.sleep(5)
-
     def upload_to_erp(self, data, settings):
         if not self.check_network():
             self.upload_error = True

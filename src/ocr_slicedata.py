@@ -222,56 +222,177 @@ class SliceDataManager(object):
 
 class DataCheckUI(object):
     def __init__(self, data_value, raw_text=""):
-        self.root = tk.Tk()
+        self.root = tk.Tk()  # 創建自己的root窗口
         self.root.title("數據確認")
         self.data_manager = SliceDataManager()
         self.result = None
 
         # 設置窗口大小和位置
         window_width = 400
-        window_height = 250
+        window_height = 350
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
-        self.root.geometry("{0}x{1}+{2}+{3}".format(
-            window_width, window_height, x, y))
+        self.root.geometry("%dx%d+%d+%d" % (window_width, window_height, x, y))
 
         self.create_widgets(data_value, raw_text)
+
+    def show_error_message(self, message):
+        """顯示錯誤訊息對話框"""
+        messagebox.showerror("錯誤", message)
 
     def create_widgets(self, data_value, raw_text):
         # OCR原始文本顯示
         if raw_text:
             raw_frame = ttk.Frame(self.root)
             raw_frame.pack(pady=5, padx=20, fill='x')
-            ttk.Label(raw_frame, text="OCR原始文本:").pack(side='left')
-            ttk.Label(raw_frame, text=raw_text).pack(side='left', padx=(5, 0))
 
-        # Data Name 輸入框
+            ttk.Label(
+                raw_frame,
+                text="OCR原始文本:"
+            ).pack(side='left')
+
+            ttk.Label(
+                raw_frame,
+                text=raw_text
+            ).pack(side='left', padx=(5, 0))
+
+        # Data Name 輸入區域
         name_frame = ttk.Frame(self.root)
         name_frame.pack(pady=10, padx=20, fill='x')
 
-        ttk.Label(name_frame, text="Data Name:").pack(side='left')
+        ttk.Label(
+            name_frame,
+            text="Data Name:"
+        ).pack(side='left')
+
         self.name_var = tk.StringVar(value=self.data_manager.last_data_name)
-        self.name_entry = ttk.Entry(name_frame, textvariable=self.name_var)
+        self.name_entry = ttk.Entry(
+            name_frame,
+            textvariable=self.name_var
+        )
         self.name_entry.pack(side='left', fill='x', expand=True, padx=(5, 0))
 
-        # Data Value 輸入框
+        # Data Value 輸入區域
         value_frame = ttk.Frame(self.root)
         value_frame.pack(pady=10, padx=20, fill='x')
 
-        ttk.Label(value_frame, text="Data Value:").pack(side='left')
+        ttk.Label(
+            value_frame,
+            text="Data Value:"
+        ).pack(side='left')
+
         self.value_var = tk.StringVar(value=str(data_value))
-        self.value_entry = ttk.Entry(value_frame, textvariable=self.value_var)
+        self.value_entry = ttk.Entry(
+            value_frame,
+            textvariable=self.value_var
+        )
         self.value_entry.pack(side='left', fill='x', expand=True, padx=(5, 0))
 
-        # 按鈕框架
+        # 載入設置並顯示
+        settings = self.data_manager.settings_manager.load_current_settings()
+
+        if settings:
+            # Sample Name
+            sample_frame = ttk.Frame(self.root)
+            sample_frame.pack(pady=5, padx=20, fill='x')
+
+            ttk.Label(
+                sample_frame,
+                text="Sample Name:"
+            ).pack(side='left')
+
+            ttk.Label(
+                sample_frame,
+                text=settings.get('sample_name', '')
+            ).pack(side='left', padx=(5, 0))
+
+            # Position Name
+            position_frame = ttk.Frame(self.root)
+            position_frame.pack(pady=5, padx=20, fill='x')
+
+            ttk.Label(
+                position_frame,
+                text="Position Name:"
+            ).pack(side='left')
+
+            ttk.Label(
+                position_frame,
+                text=settings.get('position_name', '')
+            ).pack(side='left', padx=(5, 0))
+
+            # Group Name
+            group_frame = ttk.Frame(self.root)
+            group_frame.pack(pady=5, padx=20, fill='x')
+
+            ttk.Label(
+                group_frame,
+                text="Group Name:"
+            ).pack(side='left')
+
+            ttk.Label(
+                group_frame,
+                text=settings.get('group_name', '')
+            ).pack(side='left', padx=(5, 0))
+
+            # Operator
+            operator_frame = ttk.Frame(self.root)
+            operator_frame.pack(pady=5, padx=20, fill='x')
+
+            ttk.Label(
+                operator_frame,
+                text="Operator:"
+            ).pack(side='left')
+
+            ttk.Label(
+                operator_frame,
+                text=settings.get('operator', 'Unknown')
+            ).pack(side='left', padx=(5, 0))
+
+            # Slide ID
+            slide_frame = ttk.Frame(self.root)
+            slide_frame.pack(pady=5, padx=20, fill='x')
+
+            ttk.Label(
+                slide_frame,
+                text="Slide ID:"
+            ).pack(side='left')
+
+            ttk.Label(
+                slide_frame,
+                text=settings.get('slide_id', '')
+            ).pack(side='left', padx=(5, 0))
+
+            # Sample Number
+            number_frame = ttk.Frame(self.root)
+            number_frame.pack(pady=5, padx=20, fill='x')
+
+            ttk.Label(
+                number_frame,
+                text="Sample Number:"
+            ).pack(side='left')
+
+            ttk.Label(
+                number_frame,
+                text=settings.get('sample_number', '')
+            ).pack(side='left', padx=(5, 0))
+
+        # 按鈕區域
         button_frame = ttk.Frame(self.root)
         button_frame.pack(pady=20)
 
-        ttk.Button(button_frame, text="確認", command=self.confirm).pack(side='left', padx=10)
-        ttk.Button(button_frame, text="取消", command=self.cancel).pack(side='left', padx=10)
+        ttk.Button(
+            button_frame,
+            text="確認",
+            command=self.confirm
+        ).pack(side='left', padx=10)
 
+        ttk.Button(
+            button_frame,
+            text="取消",
+            command=self.cancel
+        ).pack(side='left', padx=10)
     def confirm(self):
         try:
             data_name = self.name_var.get().strip()
@@ -353,6 +474,8 @@ def process_slice_data():
             return True
         else:
             logging.error("Failed to process slice data")
+            ui.show_error_message("無法上傳到erp,請檢查網路或是本地資料庫")
+
             return False
 
     except Exception as e:
