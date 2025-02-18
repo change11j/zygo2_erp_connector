@@ -2,9 +2,6 @@ import logging
 import tkinter as tk
 from tkinter import ttk, messagebox
 import time
-from collections import defaultdict
-import socket
-import requests
 from datetime import datetime
 
 
@@ -83,11 +80,12 @@ class MeasurementUI:
 
         self.last_base_info = current_base_info
 
+
         # 更新基础信息
         for i, (key, value) in enumerate(data['base_info'].items()):
             if key != 'Updata' and key in 'operator' 'groupName' "slide_id" "sample_number" :  # 跳过Updata字段
                 if key not in self.base_info_labels:
-                    ttk.Label(self.base_frame, text=f"{key}:").grid(row=i // 3, column=(i % 3) * 2, sticky="e", padx=5)
+                    ttk.Label(self.base_frame, text=str.format("%s:",key)).grid(row=i // 3, column=(i % 3) * 2, sticky="e", padx=5)
                     self.base_info_labels[key] = ttk.Label(self.base_frame, text=value)
                     self.base_info_labels[key].grid(row=i // 3, column=(i % 3) * 2 + 1, sticky="w")
                 else:
@@ -124,7 +122,7 @@ class MeasurementUI:
                 label_frame = ttk.Frame(self.sop_frame)
                 label_frame.pack(fill="x", padx=5, pady=2)
 
-                ttk.Label(label_frame, text=f"{key}:",
+                ttk.Label(label_frame, text=str.format("%s :",key),
                           width=20, anchor="e").pack(side="left", padx=(5, 2))
                 ttk.Label(label_frame, text=str(value),
                           anchor="w").pack(side="left", fill="x", expand=True)
@@ -230,7 +228,7 @@ def main():
                 'attributeName2': 'attributeValue2'
             },
             'measurement': {
-                'positionName': f'positionName{1}',
+                'positionName': 1,
                 'dataname1': '1.399',
                 'dataname2': '1.435',
                 'dataname3': '1.425',
