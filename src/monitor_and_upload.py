@@ -104,6 +104,9 @@ class MeasurementMonitor:
 
     def get_measurement_data(self, settings):
         """收集所有测量字段的数据"""
+        logging.debug("Settings received: %s", str(settings))
+
+        # 基本数据保持不变
         base_data = {
             'sample_name': settings.get('sample_name', ''),
             'group_name': settings.get('group_name', ''),
@@ -114,14 +117,13 @@ class MeasurementMonitor:
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
         }
 
-        # 收集 SOP 参数作为 attributes
+        # SOP 参数收集保持不变
         sop_params = {}
         excluded_fields = [
             'sample_name', 'group_name', 'position_name',
             'operator', 'measurement_fields', 'timestamp',
             'slide_id', 'sample_number'
         ]
-
         for key, value in settings.items():
             if key not in excluded_fields:
                 sop_params[key] = value
@@ -131,57 +133,66 @@ class MeasurementMonitor:
             logging.error("No measurement fields found in settings")
             return None
 
+        # 获取所有需要的字段名
+        required_fields = set(field['name'] for field in settings.get('measurement_fields', []))
+        logging.debug(f"Required fields: {required_fields}")
+
         # 收集测量数据
-        changed_measurements = []
+        measurement_results = []
+        collected_fields = set()
         has_changes = False
 
         for field in settings.get('measurement_fields', []):
             try:
                 field_name = field['name']
-                cleaned_path = []
-                for segment in field['path'].split(','):
-                    cleaned_path.append(segment.strip().strip('"').strip("'"))
+                cleaned_path = [
+                    segment.strip().strip('"').strip("'")
+                    for segment in field['path'].split(',')
+                ]
                 path = tuple(cleaned_path)
 
+                # 获取测量值
                 value = mx.get_result_number(path, Units.MicroMeters)
+                logging.debug(f"Field {field_name} at path {path}: {value}")
 
                 if value is not None:
                     # 创建测量数据记录
                     measurement_data = {
                         'field_name': field_name,
                         'value': value,
-                        'attributes': dict(sop_params),  # 使用 dict() 替代 .copy()
+                        'attributes': sop_params.copy(),
                         'operator': base_data['operator']
                     }
 
-                    # 判断是否有变化
-                    value_changed = False
-                    if self.last_data is None:
-                        value_changed = True
-                    elif field_name not in self.last_data:
-                        value_changed = True
-                    else:
-                        old_value = self.last_data.get(field_name, 0)
-                        if abs(old_value - value) > 1e-6:
-                            value_changed = True
-
-                    if value_changed:
+                    # 检查数据变化
+                    if (self.last_data is None or
+                            field_name not in self.last_data or
+                            abs(self.last_data.get(field_name, 0) - value) > 1e-6):
                         has_changes = True
-                        changed_measurements.append(measurement_data)
+
+                    measurement_results.append(measurement_data)
+                    collected_fields.add(field_name)
 
             except Exception as e:
-                logging.error("Error getting field %s: %s" % (field_name, str(e)))
+                logging.error(f"Error getting field {field_name}: {str(e)}")
 
-        if has_changes and changed_measurements:
-            # 更新 last_data，只包含有变化的值
-            new_last_data = {}
-            for measurement in changed_measurements:
-                new_last_data[measurement['field_name']] = measurement['value']
-            self.last_data = new_last_data
+        # 检查是否收集到所有字段
+        if collected_fields != required_fields:
+            missing = required_fields - collected_fields
+            logging.warning(f"Missing data for fields: {missing}")
+            logging.warning(f"Collected fields: {collected_fields}")
+            return None
+
+        # 只有在有变化且数据完整时才返回
+        if has_changes and len(measurement_results) == len(required_fields):
+            self.last_data = {result['field_name']: result['value']
+                              for result in measurement_results}
             self.new_data_available = True
 
-            return base_data, changed_measurements
+            logging.info(f"Returning {len(measurement_results)} measurements")
+            return base_data, measurement_results
 
+        logging.debug("No changes or incomplete data")
         return None
 
     def monitoring_thread(self):
