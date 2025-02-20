@@ -104,7 +104,7 @@ class MeasurementMonitor:
 
     def get_measurement_data(self, settings):
         """收集所有测量字段的数据"""
-        logging.info("Settings received: %s", str(settings))
+        logging.debug("Settings received: %s", str(settings))
 
         # 基本数据保持不变
         base_data = {
