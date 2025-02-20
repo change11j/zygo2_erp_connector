@@ -3,10 +3,15 @@ from __future__ import print_function
 import os
 import json
 import sqlite3
+import sys
 from datetime import datetime
 from logging import fatal
 from tkinter import messagebox
 
+# zygo_path = 'C:\\projects\\zygo2_erp_connector'
+zygo_path = '/Users/mac/Desktop/topgiga/projects/zygo2_erp_connector/zygo2_erp_connector'
+if zygo_path not in sys.path:
+    sys.path.append(zygo_path)
 from zygo import mx
 
 

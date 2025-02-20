@@ -1,9 +1,7 @@
 # settings_ui.py
 from __future__ import print_function
 import json
-import os
 
-from zygo.mx import save_settings
 
 try:
     import tkinter as tk
@@ -20,8 +18,17 @@ from settings_manager import SettingsManager
 class SettingsUI(object):
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Zygo Settings Manager")
+        self.root.title("Zygo 參數設置管理")
         self.root.minsize(400, 300)
+        # 创建主框架
+        self.main_frame = ttk.Frame(self.root, padding="10")
+        self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        # 配置grid权重
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_columnconfigure(1, weight=1)
+
         self.settings_manager = SettingsManager()
         self.param_entries = {}  # 初始化放在這裡
         self.setup_ui()
@@ -40,17 +47,10 @@ class SettingsUI(object):
         finally:
             self.root.destroy()
     def setup_ui(self):
-        # 主框架
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        # 配置grid權重
-        self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_columnconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(1, weight=1)
 
         # 樣品信息區域
-        info_frame = ttk.LabelFrame(main_frame, text="基本信息", padding="5")
+        info_frame = ttk.LabelFrame(self.main_frame, text="基本信息", padding="5")
         info_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
 
         # 樣品名稱
@@ -80,7 +80,7 @@ class SettingsUI(object):
         self.sample_number.grid(row=4, column=1, sticky=(tk.W, tk.E), padx=5)
 
         # 量測欄位區域
-        field_frame = ttk.LabelFrame(main_frame, text="量測欄位", padding="5")
+        field_frame = ttk.LabelFrame(self.main_frame, text="量測欄位", padding="5")
         field_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
 
         # 建立表格
@@ -96,9 +96,9 @@ class SettingsUI(object):
         ttk.Button(btn_frame, text="刪除欄位", command=self.delete_field).pack(side=tk.LEFT, padx=5)
 
         # 參數區域
-        param_frame = ttk.LabelFrame(main_frame, text="SOP參數", padding="5")
+        param_frame = ttk.LabelFrame(self.main_frame, text="SOP參數", padding="5")
         param_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        main_frame.grid_rowconfigure(2, weight=1)
+        self.main_frame.grid_rowconfigure(2, weight=1)
 
         # 參數列表框架（使用Canvas實現滾動）
         canvas_frame = ttk.Frame(param_frame)
@@ -126,7 +126,7 @@ class SettingsUI(object):
         self.canvas.bind("<Configure>", self.on_canvas_configure)
 
         # 按鈕區域
-        button_frame = ttk.Frame(main_frame)
+        button_frame = ttk.Frame(self.main_frame)
         button_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E))
 
         # 左側按鈕

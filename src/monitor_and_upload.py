@@ -13,7 +13,8 @@ else:
 from MeasurementUI import start_ui, MeasurementUI
 
 # 添加zygo模組路徑
-zygo_path = 'C:\\projects\\zygo2_erp_connector'  # 調整為實際路徑
+# zygo_path = 'C:\\projects\\zygo2_erp_connector'
+zygo_path = '/Users/mac/Desktop/topgiga/projects/zygo2_erp_connector/zygo2_erp_connector'
 if zygo_path not in sys.path:
     sys.path.append(zygo_path)
 
