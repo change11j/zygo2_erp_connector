@@ -308,7 +308,11 @@ class SettingsUI(object):
         # 只獲取 SOP 參數
         params = self.get_current_params()
         params["measurement_fields"] = measurement_fields
-
+        if not measurement_fields:
+            params["measurement_fields"] = [{
+                "name": "default",
+                "path": ""
+            }]
         try:
             return self.settings_manager.save_settings(
                 sample_name,
