@@ -98,24 +98,50 @@ class RemoteOCR(object):
             return None
 
     def extract_number(self, text):
-        """從OCR文本中提取數字"""
+        """從OCR文本中提取數字，保留小數點前的零"""
         try:
             if not text:
                 return None
 
-            # 移除所有非數字字符(保留小數點和負號)
+            # 清理並標準化文本
+            text = text.strip()
+
+            # 檢查是否包含多個小數點或逗號
+            dots = text.count('.') + text.count(',')
+            if dots > 1:
+                logging.error(f"Multiple decimal separators found in text: {text}")
+                return None
+
+            # 替換逗號為小數點
+            text = text.replace(',', '.')
+
+            # 只保留數字、小數點和負號
             number_text = ''.join(c for c in text if c.isdigit() or c in '.-')
 
-            # 嘗試轉換為浮點數
+            # 檢查格式
+            if not number_text:
+                return None
+
             try:
-                return float(number_text)
-            except ValueError:
-                logging.error("Could not convert '{0}' to float".format(number_text))
+                value = float(number_text)
+
+                # 保持前導零的格式
+                if text.startswith("0"):
+                    # 使用格式化字符串保持前導零
+                    return float(f"{value:.{len(text.split('.')[1]) if '.' in text else 0}f}")
+                return value
+
+            except ValueError as e:
+                logging.error(f"Value error converting '{text}' to float: {e}")
+                return None
+            except IndexError as e:
+                logging.error(f"Index error processing '{text}': {e}")
                 return None
 
         except Exception as e:
-            logging.error("Number extraction error: {0}".format(e))
+            logging.error(f"General error in extract_number: {e}")
             return None
+
 
 class SliceDataManager(object):
     def __init__(self):
@@ -149,14 +175,24 @@ class SliceDataManager(object):
         try:
             settings = self.settings_manager.load_current_settings()
             if not settings:
-                logging.error("No settings found for slice data upload")
+                logging.error("No settings found")
                 return False
+
+            # 獲取 SOP 參數
+            sop_params = {}
+            exclude_keys = {'sample_name', 'position_name', 'group_name',
+                            'operator', 'measurement_fields', 'slide_id',
+                            'sample_number', 'appx_filename'}
+
+            for key, value in settings.items():
+                if key not in exclude_keys:
+                    sop_params[key] = value
 
             with self.slice_data_lock:
                 with sqlite3.connect(self.db_manager.db_path) as conn:
                     c = conn.cursor()
 
-                    # 1. 首先插入measures表記錄
+                    # 1. 插入 measures 表記錄
                     c.execute("""
                         INSERT INTO measures 
                         (sample_name, position_name, group_name, operator, appx_filename, 
@@ -172,10 +208,9 @@ class SliceDataManager(object):
                         settings.get('sample_number', '')
                     ))
 
-                    # 獲取新插入的measure_id
                     measure_id = c.lastrowid
 
-                    # 2. 插入measured_data表記錄
+                    # 2. 插入 measured_data 表記錄
                     c.execute("""
                         INSERT INTO measured_data 
                         (measure_id, data_name, data_value, identity_path)
@@ -184,20 +219,30 @@ class SliceDataManager(object):
                         measure_id,
                         data_name,
                         float(data_value),
-                        "OCR_GENERATED"  # 因為是OCR生成的數據,使用固定標識
+                        "OCR_GENERATED"
                     ))
+
+                    measured_data_id = c.lastrowid
+
+                    # 3. 插入 SOP 參數到 measure_attributes 表
+                    for param_name, param_value in sop_params.items():
+                        c.execute("""
+                            INSERT INTO measure_attributes
+                            (measured_data_id, attribute_name, attribute_value)
+                            VALUES (?, ?, ?)
+                        """, (measured_data_id, param_name, str(param_value)))
 
                     conn.commit()
 
-                # 構建用於ERP上傳的數據結構
+                # 構建用於 ERP 上傳的數據結構
                 measured_data = {
                     'field_name': data_name,
                     'value': float(data_value),
-                    'attributes': {},
+                    'attributes': sop_params,  # 加入 SOP 參數
                     'operator': settings.get('operator', 'Unknown')
                 }
 
-                # 上傳到ERP
+                # 上傳到 ERP
                 success, error = ERPAPIUtil.upload_measurement(
                     settings.get('sample_name', ''),
                     settings.get('position_name', ''),
@@ -220,195 +265,193 @@ class SliceDataManager(object):
             logging.error("Error in save_and_upload_slice_data: {0}".format(e))
             return False
 
-class DataCheckUI(object):
+
+class DataCheckUI:
     def __init__(self, data_value, raw_text=""):
-        self.root = tk.Tk()  # 創建自己的root窗口
+        self.root = tk.Tk()
         self.root.title("數據確認")
         self.data_manager = SliceDataManager()
         self.result = None
 
+        # 載入當前設置
+        self.settings = self.data_manager.settings_manager.load_current_settings()
+
         # 設置窗口大小和位置
-        window_width = 400
-        window_height = 350
+        window_width = 600  # 加寬以容納更多內容
+        window_height = 800
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
-        self.root.geometry("%dx%d+%d+%d" % (window_width, window_height, x, y))
+        self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
+        # 創建滾動視窗
+        self.create_scrollable_frame()
         self.create_widgets(data_value, raw_text)
 
-    def show_error_message(self, message):
-        """顯示錯誤訊息對話框"""
-        messagebox.showerror("錯誤", message)
+    def create_scrollable_frame(self):
+        # 創建主滾動視窗
+        self.main_canvas = tk.Canvas(self.root)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.main_canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.main_canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+        )
+
+        self.main_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.main_canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Pack 到主窗口
+        self.main_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
     def create_widgets(self, data_value, raw_text):
-        # OCR原始文本顯示
+        # OCR結果區域
+        ocr_frame = ttk.LabelFrame(self.scrollable_frame, text="OCR 結果", padding="5")
+        ocr_frame.pack(fill="x", padx=5, pady=5)
+
         if raw_text:
-            raw_frame = ttk.Frame(self.root)
-            raw_frame.pack(pady=5, padx=20, fill='x')
+            ttk.Label(ocr_frame, text="原始文本:").pack(side="left")
+            ttk.Label(ocr_frame, text=raw_text).pack(side="left", padx=5)
 
-            ttk.Label(
-                raw_frame,
-                text="OCR原始文本:"
-            ).pack(side='left')
+        # 測量數據區域
+        measure_frame = ttk.LabelFrame(self.scrollable_frame, text="測量數據", padding="5")
+        measure_frame.pack(fill="x", padx=5, pady=5)
 
-            ttk.Label(
-                raw_frame,
-                text=raw_text
-            ).pack(side='left', padx=(5, 0))
-
-        # Data Name 輸入區域
-        name_frame = ttk.Frame(self.root)
-        name_frame.pack(pady=10, padx=20, fill='x')
-
-        ttk.Label(
-            name_frame,
-            text="Data Name:"
-        ).pack(side='left')
-
+        # Data Name
+        name_frame = ttk.Frame(measure_frame)
+        name_frame.pack(fill="x", pady=2)
+        ttk.Label(name_frame, text="Data Name:").pack(side="left")
         self.name_var = tk.StringVar(value=self.data_manager.last_data_name)
-        self.name_entry = ttk.Entry(
-            name_frame,
-            textvariable=self.name_var
-        )
-        self.name_entry.pack(side='left', fill='x', expand=True, padx=(5, 0))
+        self.name_entry = ttk.Entry(name_frame, textvariable=self.name_var)
+        self.name_entry.pack(side="left", padx=5, fill="x", expand=True)
 
-        # Data Value 輸入區域
-        value_frame = ttk.Frame(self.root)
-        value_frame.pack(pady=10, padx=20, fill='x')
-
-        ttk.Label(
-            value_frame,
-            text="Data Value:"
-        ).pack(side='left')
-
+        # Data Value
+        value_frame = ttk.Frame(measure_frame)
+        value_frame.pack(fill="x", pady=2)
+        ttk.Label(value_frame, text="Data Value:").pack(side="left")
         self.value_var = tk.StringVar(value=str(data_value))
-        self.value_entry = ttk.Entry(
-            value_frame,
-            textvariable=self.value_var
-        )
-        self.value_entry.pack(side='left', fill='x', expand=True, padx=(5, 0))
+        self.value_entry = ttk.Entry(value_frame, textvariable=self.value_var)
+        self.value_entry.pack(side="left", padx=5, fill="x", expand=True)
 
-        # 載入設置並顯示
-        settings = self.data_manager.settings_manager.load_current_settings()
+        # SOP參數區域
+        sop_frame = ttk.LabelFrame(self.scrollable_frame, text="SOP 參數", padding="5")
+        sop_frame.pack(fill="x", padx=5, pady=5)
 
-        if settings:
-            # Sample Name
-            sample_frame = ttk.Frame(self.root)
-            sample_frame.pack(pady=5, padx=20, fill='x')
+        # 創建SOP參數輸入欄位
+        self.sop_entries = {}
+        exclude_keys = ['sample_name', 'position_name', 'group_name',
+                        'operator', 'measurement_fields', 'slide_id',
+                        'sample_number', 'appx_filename']
 
-            ttk.Label(
-                sample_frame,
-                text="Sample Name:"
-            ).pack(side='left')
+        for key, value in self.settings.items():
+            if key not in exclude_keys:
+                param_frame = ttk.Frame(sop_frame)
+                param_frame.pack(fill="x", pady=2)
+                ttk.Label(param_frame, text=f"{key}:").pack(side="left")
+                value_var = tk.StringVar(value=str(value))
+                entry = ttk.Entry(param_frame, textvariable=value_var)
+                entry.pack(side="left", padx=5, fill="x", expand=True)
+                self.sop_entries[key] = value_var
 
-            ttk.Label(
-                sample_frame,
-                text=settings.get('sample_name', '')
-            ).pack(side='left', padx=(5, 0))
+        # 基本資訊區域（改為可編輯）
+        info_frame = ttk.LabelFrame(self.scrollable_frame, text="基本資訊", padding="5")
+        info_frame.pack(fill="x", padx=5, pady=5)
 
-            # Position Name
-            position_frame = ttk.Frame(self.root)
-            position_frame.pack(pady=5, padx=20, fill='x')
+        # 創建基本資訊輸入欄位
+        self.base_info_entries = {}
 
-            ttk.Label(
-                position_frame,
-                text="Position Name:"
-            ).pack(side='left')
+        # 基本資訊欄位定義
+        base_info_fields = [
+            ("sample_name", "Sample Name", self.settings.get('sample_name', '')),
+            ("position_name", "Position Name", self.settings.get('position_name', '')),
+            ("group_name", "Group Name", self.settings.get('group_name', '')),
+            ("operator", "Operator", self.settings.get('operator', '')),
+            ("sample_number", "Sample Number", self.settings.get('sample_number', ''))
+        ]
 
-            ttk.Label(
-                position_frame,
-                text=settings.get('position_name', '')
-            ).pack(side='left', padx=(5, 0))
+        # 創建每個基本資訊的輸入欄位
+        for key, label, value in base_info_fields:
+            info_row = ttk.Frame(info_frame)
+            info_row.pack(fill="x", pady=2)
 
-            # Group Name
-            group_frame = ttk.Frame(self.root)
-            group_frame.pack(pady=5, padx=20, fill='x')
+            # 標籤
+            ttk.Label(info_row, text=f"{label}:", width=15).pack(side="left")
 
-            ttk.Label(
-                group_frame,
-                text="Group Name:"
-            ).pack(side='left')
+            # 輸入框
+            value_var = tk.StringVar(value=value)
+            entry = ttk.Entry(info_row)
+            entry.insert(0, value)
+            entry.pack(side="left", padx=5, fill="x", expand=True)
 
-            ttk.Label(
-                group_frame,
-                text=settings.get('group_name', '')
-            ).pack(side='left', padx=(5, 0))
-
-            # Operator
-            operator_frame = ttk.Frame(self.root)
-            operator_frame.pack(pady=5, padx=20, fill='x')
-
-            ttk.Label(
-                operator_frame,
-                text="Operator:"
-            ).pack(side='left')
-
-            ttk.Label(
-                operator_frame,
-                text=settings.get('operator', 'Unknown')
-            ).pack(side='left', padx=(5, 0))
-
-            # Slide ID
-            slide_frame = ttk.Frame(self.root)
-            slide_frame.pack(pady=5, padx=20, fill='x')
-
-            ttk.Label(
-                slide_frame,
-                text="Slide ID:"
-            ).pack(side='left')
-
-            ttk.Label(
-                slide_frame,
-                text=settings.get('slide_id', '')
-            ).pack(side='left', padx=(5, 0))
-
-            # Sample Number
-            number_frame = ttk.Frame(self.root)
-            number_frame.pack(pady=5, padx=20, fill='x')
-
-            ttk.Label(
-                number_frame,
-                text="Sample Number:"
-            ).pack(side='left')
-
-            ttk.Label(
-                number_frame,
-                text=settings.get('sample_number', '')
-            ).pack(side='left', padx=(5, 0))
+            # 保存到字典中以便後續使用
+            self.base_info_entries[key] = entry
 
         # 按鈕區域
-        button_frame = ttk.Frame(self.root)
-        button_frame.pack(pady=20)
+        button_frame = ttk.Frame(self.scrollable_frame)
+        button_frame.pack(pady=10)
+        ttk.Button(button_frame, text="確認", command=self.confirm).pack(side="left", padx=5)
+        ttk.Button(button_frame, text="取消", command=self.cancel).pack(side="left", padx=5)
 
-        ttk.Button(
-            button_frame,
-            text="確認",
-            command=self.confirm
-        ).pack(side='left', padx=10)
-
-        ttk.Button(
-            button_frame,
-            text="取消",
-            command=self.cancel
-        ).pack(side='left', padx=10)
     def confirm(self):
         try:
+            # 驗證輸入
             data_name = self.name_var.get().strip()
             data_value = float(self.value_var.get().strip())
 
             if not data_name:
                 raise ValueError("Data name cannot be empty")
 
+            # 更新基本資訊
+            for key, entry in self.base_info_entries.items():
+                value = entry.get().strip()
+                if not value and key in ['sample_name', 'position_name', 'group_name']:
+                    raise ValueError(f"{key} cannot be empty")
+                self.settings[key] = value
+
+            # 更新 SOP 參數
+            for key, var in self.sop_entries.items():
+                self.settings[key] = var.get().strip()
+
+            # 更新 slide_id
+            import time
+            today = time.strftime("%Y%m%d")
+            self.settings['slide_id'] = "{0}-{1}-{2}".format(
+                self.settings['sample_name'],
+                today,
+                self.settings['sample_number']
+            )
+
+            # 保存設置
+            success = self.data_manager.settings_manager.save_settings(
+                self.settings['sample_name'],
+                self.settings['position_name'],
+                self.settings['group_name'],
+                self.settings['operator'],
+                self.settings.get('appx_filename', 'Unknown.appx'),
+                self.settings['slide_id'],
+                self.settings['sample_number'],
+                self.settings
+            )
+
+            if not success:
+                raise ValueError("Failed to save settings")
+
+            # 設置結果
             self.result = {
                 'data_name': data_name,
-                'data_value': data_value
+                'data_value': data_value,
+                'settings': self.settings
             }
+
             self.root.destroy()
 
         except ValueError as e:
             messagebox.showerror("Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", f"Unexpected error: {str(e)}")
 
     def cancel(self):
         self.result = None
