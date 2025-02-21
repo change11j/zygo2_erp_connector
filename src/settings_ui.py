@@ -384,6 +384,7 @@ class SettingsUI(object):
         self.root.geometry("800x600")
         self.root.update_idletasks()
 
+
         # 居中顯示
         width = self.root.winfo_width()
         height = self.root.winfo_height()
