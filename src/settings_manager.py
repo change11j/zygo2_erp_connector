@@ -72,6 +72,15 @@ class SettingsManager(object):
                     FOREIGN KEY (measured_data_id) REFERENCES measured_data(id)
                 )
             """)
+            # 添加 PS 重复模式表
+            self.cursor.execute("""
+                   CREATE TABLE IF NOT EXISTS ps_repeat_patterns (
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       measure_id INTEGER,
+                       pattern_data TEXT NOT NULL,
+                       FOREIGN KEY (measure_id) REFERENCES measures(id)
+                   )
+               """)
 
             self.conn.commit()
             print("Database initialized successfully")
@@ -339,6 +348,47 @@ class SettingsManager(object):
         except Exception as e:
             messagebox.showerror("錯誤", "導出失敗: {}".format(e))
 
+    def save_ps_patterns(self, measure_id, patterns):
+        """保存PS重複模式"""
+        try:
+            # 將patterns轉為JSON字符串
+            pattern_json = json.dumps(patterns)
+            self.cursor.execute("""
+                INSERT INTO ps_repeat_patterns 
+                (measure_id, pattern_data) 
+                VALUES (?, ?)
+            """, (measure_id, pattern_json))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error saving PS patterns: {e}")
+            return False
+
+    def get_ps_patterns(self, measure_id):
+        """獲取PS重複模式"""
+        try:
+            self.cursor.execute("""
+                SELECT pattern_data
+                FROM ps_repeat_patterns
+                WHERE measure_id = ?
+            """, (measure_id,))
+            result = self.cursor.fetchone()
+            if result:
+                return json.loads(result[0])
+            return None
+        except Exception as e:
+            print(f"Error getting PS patterns: {e}")
+            return None
+
+    def get_latest_measure_id(self):
+        """获取最新的 measure_id"""
+        try:
+            self.cursor.execute("SELECT MAX(id) FROM measures")
+            result = self.cursor.fetchone()
+            return result[0] if result else None
+        except Exception as e:
+            print("Error getting latest measure id:", str(e))
+            return None
 
 
     def close(self):

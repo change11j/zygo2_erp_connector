@@ -201,49 +201,88 @@ class PSSettingsUI(SettingsUI):
                 self.repeat_tree.delete(item)
 
     def save_settings(self):
-        """重写保存设置方法"""
-        # 获取基本参数
-        params = self.get_current_params()
+        """重寫保存設置方法"""
+        # 獲取基本信息
+        sample_name = self.sample_name.get().strip()
+        group_name = self.group_name.get().strip()
+        position_name = self.position.get().strip()
+        operator = self.operator.get().strip()
+        sample_number = self.sample_number.get().strip()
 
-        # 获取量测字段
+        # 獲取當前的 HT/DOM 值
+        current_ht = None
+        current_dom = None
+        if self.repeat_patterns['HT']:
+            current_ht = self.repeat_patterns['HT'][self.current_ht_index]
+            if current_ht in self.repeat_patterns['DOM'] and self.repeat_patterns['DOM'][current_ht]:
+                current_dom = self.repeat_patterns['DOM'][current_ht][self.current_dom_index]
+
+        # 構建參數字典
+        params = self.get_current_params()
         measurement_fields = []
+
+        # 處理量測欄位和HT/DOM參數
         for item in self.field_tree.get_children():
             values = self.field_tree.item(item)["values"]
+            field_name = values[0]
+            field_path = values[1]
+
+            # 為每個欄位添加HT/DOM參數
+            if current_ht is not None:
+                ht_param_name = f"{field_name}_HT%"
+                params[ht_param_name] = str(current_ht)
+
+            if current_dom is not None:
+                dom_param_name = f"{field_name}_DOM"
+                params[dom_param_name] = str(current_dom)
+
             measurement_fields.append({
-                "name": values[0],
-                "path": values[1]
+                "name": field_name,
+                "path": field_path
             })
+
+        # 加入量測欄位到參數中
         params["measurement_fields"] = measurement_fields
-
-        # 将当前的 HT/DOM 作为普通参数
-        if self.repeat_patterns['HT']:
-            ht_value = self.repeat_patterns['HT'][self.current_ht_index]
-            params['HT%'] = str(ht_value)
-
-            if ht_value in self.repeat_patterns['DOM'] and self.repeat_patterns['DOM'][ht_value]:
-                dom_values = self.repeat_patterns['DOM'][ht_value]
-                params['DOM'] = str(dom_values[self.current_dom_index])
-
-                # 更新索引，为下一次准备
-                self.current_dom_index = (self.current_dom_index + 1) % len(dom_values)
-                if self.current_dom_index == 0:  # 如果 DOM 循环完成，换下一个 HT
-                    self.current_ht_index = (self.current_ht_index + 1) % len(self.repeat_patterns['HT'])
-
-        # 调用父类的 save_settings 来保存
-        if super().save_settings():
-            # 保存重复模式数据到本地文件
-            try:
-                repeat_settings = {
-                    "repeat_patterns": self.repeat_patterns,
-                    "current_ht_index": self.current_ht_index,
-                    "current_dom_index": self.current_dom_index
-                }
-                with open('ps_settings.json', 'w', encoding='utf-8') as f:
-                    json.dump(repeat_settings, f, indent=4)
-                return True
-            except Exception as e:
-                print(f"Error saving repeat patterns: {e}")
-        return False
+        import time
+        today = time.strftime("%Y%m%d")
+        slide_id = "{0}-{1}-{2}".format(
+            sample_name,
+            today,
+            sample_number
+        ) if sample_name and sample_number else ""
+        # 調用settings_manager保存設置
+        try:
+            # 先保存基本設置和參數
+            if self.settings_manager.save_settings(
+                    sample_name,
+                    position_name,
+                    group_name,
+                    operator,
+                    "Unknown.appx",
+                    slide_id,
+                    sample_number,
+                    params
+            ):
+                # 保存重複模式
+                measure_id = self.settings_manager.get_latest_measure_id()
+                if measure_id:
+                    patterns = {
+                        'repeat_patterns': self.repeat_patterns,
+                        'current_ht_index': self.current_ht_index,
+                        'current_dom_index': self.current_dom_index
+                    }
+                    if self.settings_manager.save_ps_patterns(measure_id, patterns):
+                        # 更新索引
+                        if current_ht is not None and current_dom is not None:
+                            self.current_dom_index = (self.current_dom_index + 1) % len(
+                                self.repeat_patterns['DOM'][current_ht])
+                            if self.current_dom_index == 0:
+                                self.current_ht_index = (self.current_ht_index + 1) % len(self.repeat_patterns['HT'])
+                        return True
+            return False
+        except Exception as e:
+            print("Error saving settings: {}".format(e))
+            return False
     
     def export_ps_settings(self):
         """导出PS特有的设置到JSON文件"""
@@ -261,30 +300,40 @@ class PSSettingsUI(SettingsUI):
             return False
 
     def load_latest_settings(self):
-        """重写加载设置方法"""
-        # 先调用父类加载基本设置
+        """重寫加載設置方法"""
+        # 先調用父類加載基本設置
         super().load_latest_settings()
 
         if not hasattr(self, 'repeat_tree') or not self.repeat_tree:
             return
 
-        # 清除现有重复模式
+        # 清除現有顯示
         for item in self.repeat_tree.get_children():
             self.repeat_tree.delete(item)
 
-        # 从父类加载的设置中获取PS特有的设置
-        settings = self.settings_manager.load_current_settings()
-        if settings and "_ps_settings" in settings:
-            ps_settings = settings["_ps_settings"]
-            self.repeat_patterns = ps_settings.get("repeat_patterns", {"HT": [], "DOM": {}})
-            self.current_ht_index = ps_settings.get("current_ht_index", 0)
-            self.current_dom_index = ps_settings.get("current_dom_index", 0)
+        # 獲取最新的measure_id
+        measure_id = self.settings_manager.get_latest_measure_id()
+        if measure_id:
+            # 加載重複模式
+            patterns = self.settings_manager.get_ps_patterns(measure_id)
+            if patterns:
+                self.repeat_patterns = patterns.get('repeat_patterns', {'HT': [], 'DOM': {}})
+                self.current_ht_index = patterns.get('current_ht_index', 0)
+                self.current_dom_index = patterns.get('current_dom_index', 0)
 
-            # 重建树状显示
-            for ht_value in self.repeat_patterns['HT']:
-                ht_id = self.repeat_tree.insert("", tk.END, text="HT%", values=(f"{ht_value}%",))
-                for dom_value in self.repeat_patterns['DOM'].get(str(ht_value), []):
-                    self.repeat_tree.insert(ht_id, tk.END, text="DOM", values=(dom_value,))
+                # 更新樹狀顯示
+                for ht_value in self.repeat_patterns['HT']:
+                    ht_id = self.repeat_tree.insert("", tk.END, text="HT%", values=(f"{ht_value}%",))
+                    for dom_value in self.repeat_patterns['DOM'].get(ht_value, []):
+                        self.repeat_tree.insert(ht_id, tk.END, text="DOM", values=(dom_value,))
+
+                # 檢查並顯示當前的HT/DOM值
+                if self.repeat_patterns['HT']:
+                    current_ht = self.repeat_patterns['HT'][self.current_ht_index]
+                    if current_ht in self.repeat_patterns['DOM'] and self.repeat_patterns['DOM'][current_ht]:
+                        current_dom = self.repeat_patterns['DOM'][current_ht][self.current_dom_index]
+                        print(f"Current HT: {current_ht}%, DOM: {current_dom}")
+
 def main():
     try:
         app = PSSettingsUI()
