@@ -1,7 +1,13 @@
 {
     "repeat_patterns": {
-        "HT": [],
-        "DOM": {}
+        "HT": [
+            100.0
+        ],
+        "DOM": {
+            "100.0": [
+                20.0
+            ]
+        }
     },
     "current_ht_index": 0,
     "current_dom_index": 0
