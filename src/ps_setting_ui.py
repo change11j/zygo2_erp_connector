@@ -23,6 +23,7 @@ class PSSettingsUI(SettingsUI):
         # 调用父类初始化
         super().__init__()
         # 调整行权重
+        self.root.minsize(400,900)
         self.main_frame.grid_rowconfigure(0, weight=1)  # 基本信息
         self.main_frame.grid_rowconfigure(1, weight=1)  # 量测欄位
         self.main_frame.grid_rowconfigure(2, weight=1)  # 重复模式设置
