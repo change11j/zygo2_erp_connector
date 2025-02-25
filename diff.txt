@@ -1,0 +1,347 @@
+diff --git a/.idea/misc.xml b/.idea/misc.xml
+index d7f8eac..a0c2f06 100644
+--- a/.idea/misc.xml
++++ b/.idea/misc.xml
+@@ -3,5 +3,5 @@
+   <component name="Black">
+     <option name="sdkName" value="Python 3.12 (zygo2_erp_connector)" />
+   </component>
+-  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12 (zygo2_erp_connector)" project-jdk-type="Python SDK" />
++  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.12 (pythonProject)" project-jdk-type="Python SDK" />
+ </project>
+\ No newline at end of file
+diff --git a/.idea/webServers.xml b/.idea/webServers.xml
+index 8d04cf6..79d3a48 100644
+--- a/.idea/webServers.xml
++++ b/.idea/webServers.xml
+@@ -3,7 +3,7 @@
+   <component name="WebServers">
+     <option name="servers">
+       <webServer id="075d6c1c-8134-4834-b988-fec61a854f4e" name="zygo2">
+-        <fileTransfer accessType="SFTP" host="192.168.11.23" port="22" sshConfigId="3dd83c5c-374a-43e3-945a-75505c5ae867" sshConfig="zygo@192.168.11.23:22 key" keyPair="true">
++        <fileTransfer accessType="SFTP" host="192.168.11.40" port="22" sshConfigId="3dd83c5c-374a-43e3-945a-75505c5ae867" sshConfig="zygo@192.168.11.40:22 key" keyPair="true">
+           <advancedOptions>
+             <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+           </advancedOptions>
+diff --git a/.idea/zygo2_erp_connector.iml b/.idea/zygo2_erp_connector.iml
+index e1c834c..c0e472d 100644
+--- a/.idea/zygo2_erp_connector.iml
++++ b/.idea/zygo2_erp_connector.iml
+@@ -6,7 +6,7 @@
+       <sourceFolder url="file://$MODULE_DIR$/test" isTestSource="true" />
+       <excludeFolder url="file://$MODULE_DIR$/.venv" />
+     </content>
+-    <orderEntry type="jdk" jdkName="Python 3.12 (zygo2_erp_connector)" jdkType="Python SDK" />
++    <orderEntry type="jdk" jdkName="Python 3.12 (pythonProject)" jdkType="Python SDK" />
+     <orderEntry type="sourceFolder" forTests="false" />
+   </component>
+ </module>
+\ No newline at end of file
+diff --git a/src/db_delete.py b/src/db_delete.py
+deleted file mode 100644
+index e2cb661..0000000
+--- a/src/db_delete.py
++++ /dev/null
+@@ -1,12 +0,0 @@
+-import sqlite3
+-
+-
+-def delete_data():
+-    conn = sqlite3.connect("measurements.db")
+-    cursor = conn.cursor()
+-    cursor.execute("DROP TABLE IF EXISTS ps_repeat_patterns")
+-    conn.commit()
+-    conn.close()
+-
+-if __name__ == "__main__":
+-    delete_data()
+\ No newline at end of file
+diff --git a/src/measurements.db b/src/measurements.db
+new file mode 100644
+index 0000000..bc13a46
+Binary files /dev/null and b/src/measurements.db differ
+diff --git a/src/ps_setting_ui.py b/src/ps_setting_ui.py
+index 3a2ec73..6312f18 100644
+--- a/src/ps_setting_ui.py
++++ b/src/ps_setting_ui.py
+@@ -201,88 +201,49 @@ class PSSettingsUI(SettingsUI):
+                 self.repeat_tree.delete(item)
+ 
+     def save_settings(self):
+-        """重寫保存設置方法"""
+-        # 獲取基本信息
+-        sample_name = self.sample_name.get().strip()
+-        group_name = self.group_name.get().strip()
+-        position_name = self.position.get().strip()
+-        operator = self.operator.get().strip()
+-        sample_number = self.sample_number.get().strip()
+-
+-        # 獲取當前的 HT/DOM 值
+-        current_ht = None
+-        current_dom = None
+-        if self.repeat_patterns['HT']:
+-            current_ht = self.repeat_patterns['HT'][self.current_ht_index]
+-            if current_ht in self.repeat_patterns['DOM'] and self.repeat_patterns['DOM'][current_ht]:
+-                current_dom = self.repeat_patterns['DOM'][current_ht][self.current_dom_index]
+-
+-        # 構建參數字典
++        """重写保存设置方法"""
++        # 获取基本参数
+         params = self.get_current_params()
+-        measurement_fields = []
+ 
+-        # 處理量測欄位和HT/DOM參數
++        # 获取量测字段
++        measurement_fields = []
+         for item in self.field_tree.get_children():
+             values = self.field_tree.item(item)["values"]
+-            field_name = values[0]
+-            field_path = values[1]
++            measurement_fields.append({
++                "name": values[0],
++                "path": values[1]
++            })
++        params["measurement_fields"] = measurement_fields
+ 
+-            # 為每個欄位添加HT/DOM參數
+-            if current_ht is not None:
+-                ht_param_name = f"{field_name}_HT%"
+-                params[ht_param_name] = str(current_ht)
++        # 将当前的 HT/DOM 作为普通参数
++        if self.repeat_patterns['HT']:
++            ht_value = self.repeat_patterns['HT'][self.current_ht_index]
++            params['HT%'] = str(ht_value)
+ 
+-            if current_dom is not None:
+-                dom_param_name = f"{field_name}_DOM"
+-                params[dom_param_name] = str(current_dom)
++            if ht_value in self.repeat_patterns['DOM'] and self.repeat_patterns['DOM'][ht_value]:
++                dom_values = self.repeat_patterns['DOM'][ht_value]
++                params['DOM'] = str(dom_values[self.current_dom_index])
+ 
+-            measurement_fields.append({
+-                "name": field_name,
+-                "path": field_path
+-            })
++                # 更新索引，为下一次准备
++                self.current_dom_index = (self.current_dom_index + 1) % len(dom_values)
++                if self.current_dom_index == 0:  # 如果 DOM 循环完成，换下一个 HT
++                    self.current_ht_index = (self.current_ht_index + 1) % len(self.repeat_patterns['HT'])
+ 
+-        # 加入量測欄位到參數中
+-        params["measurement_fields"] = measurement_fields
+-        import time
+-        today = time.strftime("%Y%m%d")
+-        slide_id = "{0}-{1}-{2}".format(
+-            sample_name,
+-            today,
+-            sample_number
+-        ) if sample_name and sample_number else ""
+-        # 調用settings_manager保存設置
+-        try:
+-            # 先保存基本設置和參數
+-            if self.settings_manager.save_settings(
+-                    sample_name,
+-                    position_name,
+-                    group_name,
+-                    operator,
+-                    "Unknown.appx",
+-                    slide_id,
+-                    sample_number,
+-                    params
+-            ):
+-                # 保存重複模式
+-                measure_id = self.settings_manager.get_latest_measure_id()
+-                if measure_id:
+-                    patterns = {
+-                        'repeat_patterns': self.repeat_patterns,
+-                        'current_ht_index': self.current_ht_index,
+-                        'current_dom_index': self.current_dom_index
+-                    }
+-                    if self.settings_manager.save_ps_patterns(measure_id, patterns):
+-                        # 更新索引
+-                        if current_ht is not None and current_dom is not None:
+-                            self.current_dom_index = (self.current_dom_index + 1) % len(
+-                                self.repeat_patterns['DOM'][current_ht])
+-                            if self.current_dom_index == 0:
+-                                self.current_ht_index = (self.current_ht_index + 1) % len(self.repeat_patterns['HT'])
+-                        return True
+-            return False
+-        except Exception as e:
+-            print("Error saving settings: {}".format(e))
+-            return False
++        # 调用父类的 save_settings 来保存
++        if super().save_settings():
++            # 保存重复模式数据到本地文件
++            try:
++                repeat_settings = {
++                    "repeat_patterns": self.repeat_patterns,
++                    "current_ht_index": self.current_ht_index,
++                    "current_dom_index": self.current_dom_index
++                }
++                with open('ps_settings.json', 'w', encoding='utf-8') as f:
++                    json.dump(repeat_settings, f, indent=4)
++                return True
++            except Exception as e:
++                print(f"Error saving repeat patterns: {e}")
++        return False
+     
+     def export_ps_settings(self):
+         """导出PS特有的设置到JSON文件"""
+@@ -300,40 +261,30 @@ class PSSettingsUI(SettingsUI):
+             return False
+ 
+     def load_latest_settings(self):
+-        """重寫加載設置方法"""
+-        # 先調用父類加載基本設置
++        """重写加载设置方法"""
++        # 先调用父类加载基本设置
+         super().load_latest_settings()
+ 
+         if not hasattr(self, 'repeat_tree') or not self.repeat_tree:
+             return
+ 
+-        # 清除現有顯示
++        # 清除现有重复模式
+         for item in self.repeat_tree.get_children():
+             self.repeat_tree.delete(item)
+ 
+-        # 獲取最新的measure_id
+-        measure_id = self.settings_manager.get_latest_measure_id()
+-        if measure_id:
+-            # 加載重複模式
+-            patterns = self.settings_manager.get_ps_patterns(measure_id)
+-            if patterns:
+-                self.repeat_patterns = patterns.get('repeat_patterns', {'HT': [], 'DOM': {}})
+-                self.current_ht_index = patterns.get('current_ht_index', 0)
+-                self.current_dom_index = patterns.get('current_dom_index', 0)
+-
+-                # 更新樹狀顯示
+-                for ht_value in self.repeat_patterns['HT']:
+-                    ht_id = self.repeat_tree.insert("", tk.END, text="HT%", values=(f"{ht_value}%",))
+-                    for dom_value in self.repeat_patterns['DOM'].get(ht_value, []):
+-                        self.repeat_tree.insert(ht_id, tk.END, text="DOM", values=(dom_value,))
+-
+-                # 檢查並顯示當前的HT/DOM值
+-                if self.repeat_patterns['HT']:
+-                    current_ht = self.repeat_patterns['HT'][self.current_ht_index]
+-                    if current_ht in self.repeat_patterns['DOM'] and self.repeat_patterns['DOM'][current_ht]:
+-                        current_dom = self.repeat_patterns['DOM'][current_ht][self.current_dom_index]
+-                        print(f"Current HT: {current_ht}%, DOM: {current_dom}")
+-
++        # 从父类加载的设置中获取PS特有的设置
++        settings = self.settings_manager.load_current_settings()
++        if settings and "_ps_settings" in settings:
++            ps_settings = settings["_ps_settings"]
++            self.repeat_patterns = ps_settings.get("repeat_patterns", {"HT": [], "DOM": {}})
++            self.current_ht_index = ps_settings.get("current_ht_index", 0)
++            self.current_dom_index = ps_settings.get("current_dom_index", 0)
++
++            # 重建树状显示
++            for ht_value in self.repeat_patterns['HT']:
++                ht_id = self.repeat_tree.insert("", tk.END, text="HT%", values=(f"{ht_value}%",))
++                for dom_value in self.repeat_patterns['DOM'].get(str(ht_value), []):
++                    self.repeat_tree.insert(ht_id, tk.END, text="DOM", values=(dom_value,))
+ def main():
+     try:
+         app = PSSettingsUI()
+diff --git a/src/ps_settings.json b/src/ps_settings.json
+index 5b777d9..7245679 100644
+--- a/src/ps_settings.json
++++ b/src/ps_settings.json
+@@ -1,13 +1,7 @@
+ {
+     "repeat_patterns": {
+-        "HT": [
+-            100.0
+-        ],
+-        "DOM": {
+-            "100.0": [
+-                20.0
+-            ]
+-        }
++        "HT": [],
++        "DOM": {}
+     },
+     "current_ht_index": 0,
+     "current_dom_index": 0
+diff --git a/src/settings_manager.py b/src/settings_manager.py
+index 52626cd..77478e2 100644
+--- a/src/settings_manager.py
++++ b/src/settings_manager.py
+@@ -72,15 +72,6 @@ class SettingsManager(object):
+                     FOREIGN KEY (measured_data_id) REFERENCES measured_data(id)
+                 )
+             """)
+-            # 添加 PS 重复模式表
+-            self.cursor.execute("""
+-                   CREATE TABLE IF NOT EXISTS ps_repeat_patterns (
+-                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+-                       measure_id INTEGER,
+-                       pattern_data TEXT NOT NULL,
+-                       FOREIGN KEY (measure_id) REFERENCES measures(id)
+-                   )
+-               """)
+ 
+             self.conn.commit()
+             print("Database initialized successfully")
+@@ -348,47 +339,6 @@ class SettingsManager(object):
+         except Exception as e:
+             messagebox.showerror("錯誤", "導出失敗: {}".format(e))
+ 
+-    def save_ps_patterns(self, measure_id, patterns):
+-        """保存PS重複模式"""
+-        try:
+-            # 將patterns轉為JSON字符串
+-            pattern_json = json.dumps(patterns)
+-            self.cursor.execute("""
+-                INSERT INTO ps_repeat_patterns 
+-                (measure_id, pattern_data) 
+-                VALUES (?, ?)
+-            """, (measure_id, pattern_json))
+-            self.conn.commit()
+-            return True
+-        except Exception as e:
+-            print(f"Error saving PS patterns: {e}")
+-            return False
+-
+-    def get_ps_patterns(self, measure_id):
+-        """獲取PS重複模式"""
+-        try:
+-            self.cursor.execute("""
+-                SELECT pattern_data
+-                FROM ps_repeat_patterns
+-                WHERE measure_id = ?
+-            """, (measure_id,))
+-            result = self.cursor.fetchone()
+-            if result:
+-                return json.loads(result[0])
+-            return None
+-        except Exception as e:
+-            print(f"Error getting PS patterns: {e}")
+-            return None
+-
+-    def get_latest_measure_id(self):
+-        """获取最新的 measure_id"""
+-        try:
+-            self.cursor.execute("SELECT MAX(id) FROM measures")
+-            result = self.cursor.fetchone()
+-            return result[0] if result else None
+-        except Exception as e:
+-            print("Error getting latest measure id:", str(e))
+-            return None
+ 
+ 
+     def close(self):
+diff --git a/src/settings_ui.py b/src/settings_ui.py
+index 60b6ef6..a55b854 100644
+--- a/src/settings_ui.py
++++ b/src/settings_ui.py
+@@ -384,6 +384,7 @@ class SettingsUI(object):
+         self.root.geometry("800x600")
+         self.root.update_idletasks()
+ 
++
+         # 居中顯示
+         width = self.root.winfo_width()
+         height = self.root.winfo_height()

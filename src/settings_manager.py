@@ -74,12 +74,14 @@ class SettingsManager(object):
             """)
             # 添加 PS 重复模式表
             self.cursor.execute("""
-                   CREATE TABLE IF NOT EXISTS ps_repeat_patterns (
-                       id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       measure_id INTEGER,
-                       pattern_data TEXT NOT NULL,
-                       FOREIGN KEY (measure_id) REFERENCES measures(id)
-                   )
+                   CREATE TABLE IF NOT EXISTS ps_patterns (
+                        measure_id INTEGER PRIMARY KEY,
+                        ht_values TEXT,  -- JSON array of HT values
+                        dom_values TEXT, -- JSON object mapping HT to DOM values
+                        current_ht_index INTEGER,
+                        current_dom_index INTEGER,
+                        FOREIGN KEY (measure_id) REFERENCES measures(id)
+                    )
                """)
 
             self.conn.commit()
@@ -217,6 +219,8 @@ class SettingsManager(object):
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 settings = json.load(f)
+            if "ps_patterns" in settings:
+                del settings["ps_patterns"]
 
             # 获取 appx_filename
             try:
@@ -349,35 +353,71 @@ class SettingsManager(object):
             messagebox.showerror("錯誤", "導出失敗: {}".format(e))
 
     def save_ps_patterns(self, measure_id, patterns):
-        """保存PS重複模式"""
+        """保存PS重复模式设置"""
         try:
-            # 將patterns轉為JSON字符串
-            pattern_json = json.dumps(patterns)
-            self.cursor.execute("""
-                INSERT INTO ps_repeat_patterns 
-                (measure_id, pattern_data) 
-                VALUES (?, ?)
-            """, (measure_id, pattern_json))
-            self.conn.commit()
-            return True
+            # 确保数据一致性
+            repeat_patterns = patterns['repeat_patterns']
+            normalized_patterns = {
+                'repeat_patterns': {
+                    'HT': repeat_patterns['HT'],
+                    'DOM': {str(k): v for k, v in repeat_patterns['DOM'].items()}
+                },
+                'current_ht_index': patterns['current_ht_index'],
+                'current_dom_index': patterns['current_dom_index']
+            }
+
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+
+                # 将patterns字典的内容转换为JSON字符串
+                ht_values = json.dumps(normalized_patterns['repeat_patterns']['HT'])
+                dom_values = json.dumps(normalized_patterns['repeat_patterns']['DOM'])
+
+                c.execute("""
+                    INSERT OR REPLACE INTO ps_patterns 
+                    (measure_id, ht_values, dom_values, current_ht_index, current_dom_index)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    measure_id,
+                    ht_values,
+                    dom_values,
+                    normalized_patterns['current_ht_index'],
+                    normalized_patterns['current_dom_index']
+                ))
+
+                conn.commit()
+                return True
+
         except Exception as e:
-            print(f"Error saving PS patterns: {e}")
+            print(f"Error saving PS patterns: {str(e)}")
             return False
 
     def get_ps_patterns(self, measure_id):
-        """獲取PS重複模式"""
+        """获取PS重复模式设置"""
         try:
-            self.cursor.execute("""
-                SELECT pattern_data
-                FROM ps_repeat_patterns
-                WHERE measure_id = ?
-            """, (measure_id,))
-            result = self.cursor.fetchone()
-            if result:
-                return json.loads(result[0])
-            return None
+            with sqlite3.connect(self.db_path) as conn:
+                c = conn.cursor()
+
+                c.execute("""
+                    SELECT ht_values, dom_values, current_ht_index, current_dom_index
+                    FROM ps_patterns
+                    WHERE measure_id = ?
+                """, (measure_id,))
+
+                row = c.fetchone()
+                if row:
+                    return {
+                        'repeat_patterns': {
+                            'HT': json.loads(row[0]),
+                            'DOM': json.loads(row[1])
+                        },
+                        'current_ht_index': row[2],
+                        'current_dom_index': row[3]
+                    }
+                return None
+
         except Exception as e:
-            print(f"Error getting PS patterns: {e}")
+            print(f"Error getting PS patterns: {str(e)}")
             return None
 
     def get_latest_measure_id(self):
